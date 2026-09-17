@@ -30,8 +30,8 @@ fi
 
 echo "Это ЗАМЕНИТ текущую базу данных и .env содержимым файла:"
 echo "  $ARCHIVE"
-read -r -p "Продолжить? (yes/no): " confirm </dev/tty
-if [[ ! "$confirm" =~ ^[Yy] ]]; then
+read -r -p "Продолжить? (y/n): " confirm </dev/tty
+if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
     echo "Отменено."
     exit 0
 fi

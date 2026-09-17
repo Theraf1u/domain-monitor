@@ -12,8 +12,8 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 echo "Это остановит и удалит контейнер и Docker-образ Domain Monitor Agent."
-read -r -p "Продолжить? (yes/no): " confirm </dev/tty
-if [[ ! "$confirm" =~ ^[Yy] ]]; then
+read -r -p "Продолжить? (y/n): " confirm </dev/tty
+if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
     echo "Отменено."
     exit 0
 fi
@@ -25,22 +25,22 @@ if [ -f "$CLI_TARGET" ]; then
     echo "Удалено: $CLI_TARGET"
 fi
 
-read -r -p "Удалить также локальный буфер событий в ./data? (yes/no): " wipe_data </dev/tty
-if [[ "$wipe_data" =~ ^[Yy] ]]; then
+read -r -p "Удалить также локальный буфер событий в ./data? (y/n): " wipe_data </dev/tty
+if [[ "$wipe_data" =~ ^[Yy]$ ]]; then
     rm -rf "${PROJECT_DIR:?}/data"
     echo "Данные удалены."
 fi
 
 if [ -d "$PROJECT_DIR/backups" ]; then
-    read -r -p "Удалить также бэкапы в ./backups? (yes/no): " wipe_backups </dev/tty
-    if [[ "$wipe_backups" =~ ^[Yy] ]]; then
+    read -r -p "Удалить также бэкапы в ./backups? (y/n): " wipe_backups </dev/tty
+    if [[ "$wipe_backups" =~ ^[Yy]$ ]]; then
         rm -rf "${PROJECT_DIR:?}/backups"
         echo "Бэкапы удалены."
     fi
 fi
 
-read -r -p "Удалить также всю папку проекта ($PROJECT_DIR)? (yes/no): " wipe_all </dev/tty
-if [[ "$wipe_all" =~ ^[Yy] ]]; then
+read -r -p "Удалить также всю папку проекта ($PROJECT_DIR)? (y/n): " wipe_all </dev/tty
+if [[ "$wipe_all" =~ ^[Yy]$ ]]; then
     cd /
     rm -rf "${PROJECT_DIR:?}"
     echo "Папка проекта удалена. Удаление завершено."

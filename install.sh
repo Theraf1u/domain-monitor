@@ -347,8 +347,8 @@ uninstall_all() {
     echo "  - всю папку проекта: $PROJECT_DIR"
     echo
     local confirm
-    read -r -p "Продолжить? (yes/no): " confirm </dev/tty
-    if [[ ! "$confirm" =~ ^[Yy] ]]; then
+    read -r -p "Продолжить? (y/n): " confirm </dev/tty
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         echo "Отменено."
         return
     fi
@@ -365,8 +365,8 @@ reinstall_all() {
     echo ".env, автообновление) и сразу откроет мастер установки заново, с нуля."
     echo
     local confirm
-    read -r -p "Продолжить? (yes/no): " confirm </dev/tty
-    if [[ ! "$confirm" =~ ^[Yy] ]]; then
+    read -r -p "Продолжить? (y/n): " confirm </dev/tty
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         echo "Отменено."
         return
     fi
