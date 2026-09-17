@@ -8,7 +8,7 @@ import os
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand, FSInputFile, MenuButtonCommands
+from aiogram.types import BotCommand, FSInputFile, InputProfilePhotoStatic, MenuButtonCommands
 
 from app.config import Config
 from app.database import Database
@@ -48,7 +48,7 @@ async def configure_bot_profile(bot: Bot) -> None:
     await bot.set_my_description(description=BOT_DESCRIPTION)
     await bot.set_my_short_description(short_description=BOT_SHORT_DESCRIPTION)
     if os.path.isfile(_AVATAR_PATH):
-        await bot.set_my_profile_photo(photo=FSInputFile(_AVATAR_PATH))
+        await bot.set_my_profile_photo(photo=InputProfilePhotoStatic(photo=FSInputFile(_AVATAR_PATH)))
 
 
 def build_bot_and_dispatcher(config: Config, db: Database, notifier: Notifier) -> tuple[Bot, Dispatcher]:
