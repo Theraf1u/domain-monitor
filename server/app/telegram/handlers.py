@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -18,9 +18,11 @@ from app.backup_task import BackupTask
 from app.config import Config
 from app.database import Database
 from app.filters import classify_domain, normalize_domain
+from app.live_view import LiveViewManager
 from app.notifier import Notifier
 from app.security import generate_node_token, hash_token
 from app.telegram import keyboards as kb
+from app.topic_binding import TopicBindingManager
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +148,21 @@ async def cb_node_card(call: CallbackQuery, db: Database, config: Config) -> Non
 
     domains = db.list_domains(limit=1000, node_id=node.id)
 
+    buffer_line = ""
+    if node.agent_buffer_size:
+        buffer_line = (
+            f"\n📦 В локальном буфере агента: {node.agent_buffer_size} "
+            f"(накоплено, ждёт отправки на сервер)"
+        )
+
+    dest_line = kb.NOTIFY_DEST_LABELS.get(node.notify_destination, node.notify_destination)
+    if node.notify_destination in ("group", "both"):
+        where = (
+            f"chat_id {node.notify_group_chat_id}"
+            + (f", топик {node.notify_group_topic_id}" if node.notify_group_topic_id else "")
+        ) if node.notify_group_chat_id else "не привязано"
+        dest_line += f" ({where})"
+
     text = (
         f"🖥 <b>{node.name}</b>\n\n"
         f"Статус: {status_line}\n"
@@ -154,6 +171,8 @@ async def cb_node_card(call: CallbackQuery, db: Database, config: Config) -> Non
         f"IP: {node.ip or '—'}\n"
         f"Hostname: {node.hostname or '—'}\n\n"
         f"Доменов с этой ноды: {len(domains)}"
+        f"{buffer_line}\n"
+        f"Уведомления идут: {dest_line}"
     )
     await call.message.edit_text(text, parse_mode="HTML", reply_markup=kb.node_card(node))
     await call.answer()
@@ -175,6 +194,80 @@ async def cb_node_toggle_notif(call: CallbackQuery, db: Database, config: Config
     if node:
         db.set_node_notifications(node_id, not node.notifications_enabled)
     await cb_node_card(call, db, config)
+
+
+@router.callback_query(F.data.startswith("node_notify_dest:"))
+async def cb_node_notify_dest(call: CallbackQuery, db: Database) -> None:
+    node_id = int(call.data.split(":")[1])
+    node = db.get_node(node_id)
+    if node is None:
+        await call.answer("Нода не найдена", show_alert=True)
+        return
+    await call.message.edit_text(
+        f"📍 <b>{node.name}</b> — куда слать уведомления о новых доменах и Watch-хитах?\n\n"
+        f"💬 В ЛС — всем админам в личку (как раньше).\n"
+        f"👥 В группу — в конкретный чат, можно с указанием топика (темы) внутри него.\n"
+        f"🔀 И то, и то.",
+        parse_mode="HTML", reply_markup=kb.node_notify_dest_menu(node),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("node_notify_dest_set:"))
+async def cb_node_notify_dest_set(call: CallbackQuery, db: Database) -> None:
+    _, node_id_raw, dest = call.data.split(":")
+    node_id = int(node_id_raw)
+    db.set_node_notify_destination(node_id, dest)
+    await call.answer("Способ доставки обновлён")
+    await cb_node_notify_dest(call, db)
+
+
+@router.callback_query(F.data.startswith("node_notify_bind:"))
+async def cb_node_notify_bind(call: CallbackQuery, db: Database, topic_binding: TopicBindingManager) -> None:
+    node_id = int(call.data.split(":")[1])
+    node = db.get_node(node_id)
+    if node is None:
+        await call.answer("Нода не найдена", show_alert=True)
+        return
+    topic_binding.start(call.from_user.id, node_id)
+    await call.message.edit_text(
+        f"🔗 Привязка группы/топика для <b>{node.name}</b>\n\n"
+        f"1. Добавь бота в нужную супергруппу (обычным участником).\n"
+        f"2. Если это форум с темами — открой нужную тему, если нет - просто напиши в общий чат.\n"
+        f"3. Отправь туда команду:\n<code>/bind</code>\n\n"
+        f"Бот сам подхватит chat_id и топик из этого сообщения. Действует "
+        f"{300 // 60} минут, потом привязку нужно начать заново.",
+        parse_mode="HTML", reply_markup=kb.cancel_input(f"node_notify_dest:{node_id}"),
+    )
+    await call.answer()
+
+
+@router.message(Command("bind"))
+async def cmd_bind(message: Message, db: Database, topic_binding: TopicBindingManager) -> None:
+    user = message.from_user
+    if user is None:
+        return
+    node_id = topic_binding.pop(user.id)
+    if node_id is None:
+        # No pending bind request from this admin - a stray /bind (or an
+        # expired one). Silent in a group (no reason to spam it), a short
+        # hint in DM.
+        if message.chat.type == "private":
+            await message.reply("Нет активной привязки. Начни из карточки ноды: 📍 Куда слать -> 🔗 Привязать группу/топик.")
+        return
+    node = db.get_node(node_id)
+    if node is None:
+        return
+    db.set_node_notify_group(node_id, message.chat.id, message.message_thread_id)
+    where = f"chat_id <code>{message.chat.id}</code>"
+    if message.message_thread_id:
+        where += f", топик <code>{message.message_thread_id}</code>"
+    await message.reply(
+        f"✅ Привязано к ноде <b>{node.name}</b>: {where}.\n"
+        f"Не забудь выставить способ доставки «👥 В группу» или «🔀 В ЛС и в группу» в карточке ноды, "
+        f"если ещё не сделал.",
+        parse_mode="HTML",
+    )
 
 
 @router.callback_query(F.data.startswith("node_regen:"))
@@ -264,27 +357,37 @@ async def cb_domains(call: CallbackQuery) -> None:
     await call.answer()
 
 
-@router.callback_query(F.data == "domains_recent")
-async def cb_domains_recent(call: CallbackQuery, db: Database) -> None:
+def _domains_recent_text(db: Database) -> str:
     domains = db.list_domains(limit=20, order_by="last_seen")
     if not domains:
-        text = "Пока нет ни одного домена."
-    else:
-        lines = "\n".join(f"• <code>{d.domain}</code> ({d.hits})" for d in domains)
-        text = f"🕐 <b>Последние домены</b>\n\n{lines}"
-    await call.message.edit_text(text, parse_mode="HTML", reply_markup=kb.back_button("domains"))
+        return "Пока нет ни одного домена."
+    lines = "\n".join(f"• <code>{d.domain}</code> ({d.hits})" for d in domains)
+    return f"🕐 <b>Последние домены</b>\n\n{lines}"
+
+
+def _domains_top_text(db: Database) -> str:
+    domains = db.top_domains(limit=20)
+    if not domains:
+        return "Пока нет ни одного домена."
+    lines = "\n".join(f"• <code>{d.domain}</code> — {d.hits}" for d in domains)
+    return f"🔝 <b>Топ доменов по обращениям</b>\n\n{lines}"
+
+
+@router.callback_query(F.data == "domains_recent")
+async def cb_domains_recent(call: CallbackQuery, db: Database, live_view: LiveViewManager) -> None:
+    live_active = live_view.is_active(call.message.chat.id, call.message.message_id)
+    await call.message.edit_text(
+        _domains_recent_text(db), parse_mode="HTML", reply_markup=kb.domains_recent_menu(live_active),
+    )
     await call.answer()
 
 
 @router.callback_query(F.data == "domains_top")
-async def cb_domains_top(call: CallbackQuery, db: Database) -> None:
-    domains = db.top_domains(limit=20)
-    if not domains:
-        text = "Пока нет ни одного домена."
-    else:
-        lines = "\n".join(f"• <code>{d.domain}</code> — {d.hits}" for d in domains)
-        text = f"🔝 <b>Топ доменов по обращениям</b>\n\n{lines}"
-    await call.message.edit_text(text, parse_mode="HTML", reply_markup=kb.back_button("domains"))
+async def cb_domains_top(call: CallbackQuery, db: Database, live_view: LiveViewManager) -> None:
+    live_active = live_view.is_active(call.message.chat.id, call.message.message_id)
+    await call.message.edit_text(
+        _domains_top_text(db), parse_mode="HTML", reply_markup=kb.domains_top_menu(live_active),
+    )
     await call.answer()
 
 
@@ -406,6 +509,11 @@ def _stats_text(db: Database, config: Config, period: str) -> str:
 
     top_lines = "\n".join(f"  {i + 1}. {name} — {count}" for i, (name, count) in enumerate(top_nodes)) or "  —"
 
+    buffered_total = sum(n.agent_buffer_size or 0 for n in nodes)
+    buffered_line = (
+        f"В буферах агентов (собрано, не отправлено): {buffered_total}\n" if buffered_total else ""
+    )
+
     return (
         f"📊 <b>Статистика</b> ({period_label})\n\n"
         f"Ноды онлайн: {online}/{len(nodes)}\n"
@@ -413,20 +521,27 @@ def _stats_text(db: Database, config: Config, period: str) -> str:
         f"Новых доменов за период: {new_domains}\n"
         f"Событий за период: {events_count}\n"
         f"{rate_line}"
+        f"{buffered_line}"
         f"\nАктивные ноды за период:\n{top_lines}"
     )
 
 
 @router.callback_query(F.data == "stats")
-async def cb_stats(call: CallbackQuery, db: Database, config: Config) -> None:
-    await call.message.edit_text(_stats_text(db, config, "today"), parse_mode="HTML", reply_markup=kb.stats_menu("today"))
+async def cb_stats(call: CallbackQuery, db: Database, config: Config, live_view: LiveViewManager) -> None:
+    live_active = live_view.is_active(call.message.chat.id, call.message.message_id)
+    await call.message.edit_text(
+        _stats_text(db, config, "today"), parse_mode="HTML", reply_markup=kb.stats_menu("today", live_active),
+    )
     await call.answer()
 
 
 @router.callback_query(F.data.startswith("stats_period:"))
-async def cb_stats_period(call: CallbackQuery, db: Database, config: Config) -> None:
+async def cb_stats_period(call: CallbackQuery, db: Database, config: Config, live_view: LiveViewManager) -> None:
     period = call.data.split(":", 1)[1]
-    await call.message.edit_text(_stats_text(db, config, period), parse_mode="HTML", reply_markup=kb.stats_menu(period))
+    live_active = live_view.is_active(call.message.chat.id, call.message.message_id)
+    await call.message.edit_text(
+        _stats_text(db, config, period), parse_mode="HTML", reply_markup=kb.stats_menu(period, live_active),
+    )
     await call.answer()
 
 
@@ -891,20 +1006,80 @@ async def cb_backup_now(call: CallbackQuery, db: Database, backup_task: BackupTa
     await call.message.edit_text(result, parse_mode="HTML", reply_markup=kb.back_button("backups"))
 
 
-@router.callback_query(F.data == "backup_list")
-async def cb_backup_list(call: CallbackQuery, backup_task: BackupTask) -> None:
+def _backup_list_text(backup_task: BackupTask) -> str:
     entries = backup_task.list_backups()
     if not entries:
-        text = "📋 <b>Список бэкапов</b>\n\nПока ни одного бэкапа не сделано."
-    else:
-        lines = []
-        for name, size, mtime in entries[:20]:
-            when = datetime.fromtimestamp(mtime, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
-            lines.append(f"• <code>{name}</code> — {size // 1024} КБ, {when} UTC")
-        more = f"\n… и ещё {len(entries) - 20}" if len(entries) > 20 else ""
-        text = f"📋 <b>Список бэкапов</b>\n\n" + "\n".join(lines) + more
-    await call.message.edit_text(text, parse_mode="HTML", reply_markup=kb.back_button("backups"))
+        return "📋 <b>Список бэкапов</b>\n\nПока ни одного бэкапа не сделано."
+    lines = []
+    for name, size, mtime in entries[:20]:
+        when = datetime.fromtimestamp(mtime, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+        lines.append(f"• <code>{name}</code> — {size // 1024} КБ, {when} UTC")
+    more = f"\n… и ещё {len(entries) - 20}" if len(entries) > 20 else ""
+    return "📋 <b>Список бэкапов</b>\n\n" + "\n".join(lines) + more
+
+
+@router.callback_query(F.data == "backup_list")
+async def cb_backup_list(call: CallbackQuery, backup_task: BackupTask, live_view: LiveViewManager) -> None:
+    live_active = live_view.is_active(call.message.chat.id, call.message.message_id)
+    await call.message.edit_text(
+        _backup_list_text(backup_task), parse_mode="HTML", reply_markup=kb.backup_list_menu(live_active),
+    )
     await call.answer()
+
+
+# ------------------------------------------------------------------
+# Live views (auto-refresh for read-only info screens)
+# ------------------------------------------------------------------
+
+def _render_live_screen(
+    kind: str, arg: str | None, db: Database, config: Config, backup_task: BackupTask, live_active: bool,
+):
+    if kind == "domains_recent":
+        return _domains_recent_text(db), kb.domains_recent_menu(live_active)
+    if kind == "domains_top":
+        return _domains_top_text(db), kb.domains_top_menu(live_active)
+    if kind == "stats":
+        period = arg or "today"
+        return _stats_text(db, config, period), kb.stats_menu(period, live_active)
+    if kind == "backup_list":
+        return _backup_list_text(backup_task), kb.backup_list_menu(live_active)
+    raise ValueError(f"unknown live view kind: {kind!r}")
+
+
+@router.callback_query(F.data.startswith("live_toggle:"))
+async def cb_live_toggle(
+    call: CallbackQuery, db: Database, config: Config, backup_task: BackupTask,
+    live_view: LiveViewManager, bot: Bot,
+) -> None:
+    parts = call.data.split(":", 2)
+    kind = parts[1]
+    arg = parts[2] if len(parts) > 2 else None
+    chat_id = call.message.chat.id
+    message_id = call.message.message_id
+
+    if live_view.is_active(chat_id, message_id):
+        live_view.stop(chat_id, message_id)
+        await call.answer("Автообновление выключено")
+    else:
+        async def render() -> None:
+            text, markup = _render_live_screen(kind, arg, db, config, backup_task, True)
+            await bot.edit_message_text(
+                chat_id=chat_id, message_id=message_id, text=text, parse_mode="HTML", reply_markup=markup,
+            )
+
+        started = live_view.start(chat_id, message_id, render)
+        if not started:
+            await call.answer(
+                "Слишком много активных автообновлений сразу - выключи какое-нибудь другое и попробуй снова.",
+                show_alert=True,
+            )
+            return
+        minutes = live_view.MAX_DURATION_SECONDS // 60
+        await call.answer(f"Автообновление включено (каждые {live_view.INTERVAL_SECONDS} сек, до {minutes} мин)")
+
+    live_active = live_view.is_active(chat_id, message_id)
+    text, markup = _render_live_screen(kind, arg, db, config, backup_task, live_active)
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
 
 
 # ------------------------------------------------------------------

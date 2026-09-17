@@ -144,18 +144,34 @@ class Database:
             )
             self._conn.commit()
 
+    def set_node_notify_destination(self, node_id: int, destination: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE nodes SET notify_destination = ? WHERE id = ?", (destination, node_id)
+            )
+            self._conn.commit()
+
+    def set_node_notify_group(self, node_id: int, chat_id: int, topic_id: int | None) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE nodes SET notify_group_chat_id = ?, notify_group_topic_id = ? WHERE id = ?",
+                (chat_id, topic_id, node_id),
+            )
+            self._conn.commit()
+
     def touch_heartbeat(
         self, node_id: int, version: str | None = None, ip: str | None = None,
-        hostname: str | None = None,
+        hostname: str | None = None, buffer_size: int | None = None,
     ) -> None:
         with self._lock:
             now = _now()
-            if version is not None or ip is not None or hostname is not None:
+            if version is not None or ip is not None or hostname is not None or buffer_size is not None:
                 self._conn.execute(
                     "UPDATE nodes SET last_heartbeat_at = ?, last_seen_at = ?, "
                     "version = COALESCE(?, version), ip = COALESCE(?, ip), "
-                    "hostname = COALESCE(?, hostname) WHERE id = ?",
-                    (now, now, version, ip, hostname, node_id),
+                    "hostname = COALESCE(?, hostname), "
+                    "agent_buffer_size = COALESCE(?, agent_buffer_size) WHERE id = ?",
+                    (now, now, version, ip, hostname, buffer_size, node_id),
                 )
             else:
                 self._conn.execute(
@@ -186,6 +202,10 @@ class Database:
             last_heartbeat_at=_parse_ts(row["last_heartbeat_at"]),
             monitoring_enabled=bool(row["monitoring_enabled"]),
             notifications_enabled=bool(row["notifications_enabled"]),
+            notify_destination=row["notify_destination"],
+            notify_group_chat_id=row["notify_group_chat_id"],
+            notify_group_topic_id=row["notify_group_topic_id"],
+            agent_buffer_size=row["agent_buffer_size"],
         )
 
     # ------------------------------------------------------------------

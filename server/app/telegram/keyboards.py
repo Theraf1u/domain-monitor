@@ -54,6 +54,16 @@ def main_menu(monitoring_enabled: bool = True, sending_enabled: bool = True) -> 
     return b.as_markup()
 
 
+def _add_live_controls(b: InlineKeyboardBuilder, refresh_callback: str, live_key: str, live_active: bool) -> None:
+    """Appends a manual "🔄 Обновить" (just re-runs the screen's own
+    entry callback) and a "🔁 Автообновление" toggle (background
+    periodic re-render via app.live_view) to a screen that shows live
+    data - top/recent domains, stats, the backup list."""
+    b.button(text="🔄 Обновить", callback_data=refresh_callback)
+    live_label = "🔁 Автообновление: ВКЛ" if live_active else "🔁 Автообновление: выкл"
+    b.button(text=live_label, callback_data=f"live_toggle:{live_key}", style="danger" if live_active else "success")
+
+
 def back_button(target: str = "main") -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="⬅️ Назад", callback_data=target)
@@ -84,6 +94,13 @@ def nodes_list(nodes: list[Node], online_ids: set[int]) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
+NOTIFY_DEST_LABELS = {
+    "dm": "💬 Только в ЛС",
+    "group": "👥 Только в группу",
+    "both": "🔀 В ЛС и в группу",
+}
+
+
 def node_card(node: Node) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     mon_label = "⏸ Мониторинг (вкл)" if node.monitoring_enabled else "▶ Мониторинг (выкл)"
@@ -96,12 +113,26 @@ def node_card(node: Node) -> InlineKeyboardMarkup:
         text=notif_label, callback_data=f"node_toggle_notif:{node.id}",
         style="danger" if node.notifications_enabled else "success",
     )
+    dest_label = NOTIFY_DEST_LABELS.get(node.notify_destination, node.notify_destination)
+    b.button(text=f"📍 Куда слать: {dest_label}", callback_data=f"node_notify_dest:{node.id}", style="primary")
     if node.status == "active":
         b.button(text="🔑 Обновить токен", callback_data=f"node_regen:{node.id}", style="primary")
         b.button(text="⛔ Отозвать", callback_data=f"node_revoke:{node.id}", style="danger")
     b.button(text="🗑 Удалить", callback_data=f"node_delete:{node.id}", style="danger")
     b.button(text="⬅️ К списку нод", callback_data="nodes")
     b.adjust(1)
+    return b.as_markup()
+
+
+def node_notify_dest_menu(node: Node) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for value, label in NOTIFY_DEST_LABELS.items():
+        prefix = "✅ " if value == node.notify_destination else ""
+        b.button(text=f"{prefix}{label}", callback_data=f"node_notify_dest_set:{node.id}:{value}")
+    group_label = "🔗 Привязать группу/топик" if node.notify_group_chat_id is None else "🔗 Перепривязать группу/топик"
+    b.button(text=group_label, callback_data=f"node_notify_bind:{node.id}", style="primary")
+    b.button(text="⬅️ Назад", callback_data=f"node:{node.id}")
+    b.adjust(1, 1, 1, 1, 1)
     return b.as_markup()
 
 
@@ -150,14 +181,39 @@ def confirm_reset_data(back_target: str = "domains") -> InlineKeyboardMarkup:
 # Stats
 # ------------------------------------------------------------------
 
-def stats_menu(period: str) -> InlineKeyboardMarkup:
+def stats_menu(period: str, live_active: bool = False) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     for value, label in STATS_PERIODS:
         prefix = "✅ " if value == period else ""
         b.button(text=f"{prefix}{label}", callback_data=f"stats_period:{value}")
+    _add_live_controls(b, f"stats_period:{period}", f"stats:{period}", live_active)
     b.button(text="🗑 Сброс данных", callback_data="data_reset:stats", style="danger")
     b.button(text="⬅️ Назад", callback_data="main")
-    b.adjust(2, 2, 1, 1)
+    b.adjust(2, 2, 2, 1, 1)
+    return b.as_markup()
+
+
+def domains_recent_menu(live_active: bool = False) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    _add_live_controls(b, "domains_recent", "domains_recent", live_active)
+    b.button(text="⬅️ Назад", callback_data="domains")
+    b.adjust(2, 1)
+    return b.as_markup()
+
+
+def domains_top_menu(live_active: bool = False) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    _add_live_controls(b, "domains_top", "domains_top", live_active)
+    b.button(text="⬅️ Назад", callback_data="domains")
+    b.adjust(2, 1)
+    return b.as_markup()
+
+
+def backup_list_menu(live_active: bool = False) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    _add_live_controls(b, "backup_list", "backup_list", live_active)
+    b.button(text="⬅️ Назад", callback_data="backups")
+    b.adjust(2, 1)
     return b.as_markup()
 
 

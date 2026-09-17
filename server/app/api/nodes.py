@@ -97,7 +97,9 @@ def delete_node(node_id: int, db: Database = Depends(get_db)) -> None:
 def heartbeat(
     body: HeartbeatRequest, node: Node = Depends(require_node), db: Database = Depends(get_db),
 ) -> HeartbeatResponse:
-    db.touch_heartbeat(node.id, version=body.version, ip=body.ip, hostname=body.hostname)
+    db.touch_heartbeat(
+        node.id, version=body.version, ip=body.ip, hostname=body.hostname, buffer_size=body.buffer_size,
+    )
     return HeartbeatResponse(
         monitoring_enabled=node.monitoring_enabled and fleet_control.is_monitoring_enabled(db),
         sending_enabled=fleet_control.is_sending_enabled(db),

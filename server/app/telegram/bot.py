@@ -13,9 +13,11 @@ from aiogram.types import BotCommand, FSInputFile, InputProfilePhotoStatic, Menu
 from app.backup_task import BackupTask
 from app.config import Config
 from app.database import Database
+from app.live_view import LiveViewManager
 from app.notifier import Notifier
 from app.telegram import handlers
 from app.telegram.middleware import AdminOnlyMiddleware
+from app.topic_binding import TopicBindingManager
 
 # Optional profile photo - set via BotFather or dropped in by hand at this
 # path. Not committed by default (no logo is invented for you), so this is
@@ -54,6 +56,7 @@ async def configure_bot_profile(bot: Bot) -> None:
 
 def build_bot_and_dispatcher(
     config: Config, db: Database, notifier: Notifier, backup_task: BackupTask,
+    topic_binding: TopicBindingManager, live_view: LiveViewManager,
 ) -> tuple[Bot, Dispatcher]:
     session = AiohttpSession(proxy=config.telegram_proxy) if config.telegram_proxy else None
     bot = Bot(token=config.bot_token, session=session)
@@ -69,5 +72,7 @@ def build_bot_and_dispatcher(
     dp["config"] = config
     dp["notifier"] = notifier
     dp["backup_task"] = backup_task
+    dp["topic_binding"] = topic_binding
+    dp["live_view"] = live_view
 
     return bot, dp

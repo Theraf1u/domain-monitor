@@ -18,12 +18,14 @@ from app.api import domains, events, nodes, stats
 from app.backup_task import BackupTask
 from app.config import load_config
 from app.database import Database
+from app.live_view import LiveViewManager
 from app.logging_config import setup_logging
 from app.metrics import DOMAINS_TOTAL, NODES_ONLINE, NODES_TOTAL
 from app.notifier import Notifier
 from app.rate_limit import NodeRateLimiter
 from app.retention import RetentionTask
 from app.telegram.bot import build_bot_and_dispatcher, configure_bot_profile
+from app.topic_binding import TopicBindingManager
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +69,8 @@ async def lifespan(app: FastAPI):
 
     notifier = Notifier(db, config.admin_ids)
     backup_task = BackupTask(db, config, notifier)
+    topic_binding = TopicBindingManager()
+    live_view = LiveViewManager()
 
     app.state.config = config
     app.state.db = db
@@ -83,7 +87,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(backup_task.run()),
     ]
 
-    bot, dp = build_bot_and_dispatcher(config, db, notifier, backup_task)
+    bot, dp = build_bot_and_dispatcher(config, db, notifier, backup_task, topic_binding, live_view)
     notifier.set_bot(bot)
     try:
         await configure_bot_profile(bot)
@@ -101,6 +105,7 @@ async def lifespan(app: FastAPI):
         logger.info("Shutting down")
         notifier.stop()
         backup_task.stop()
+        live_view.stop_all()
         stop_polling.set()
         for task in background_tasks:
             task.cancel()

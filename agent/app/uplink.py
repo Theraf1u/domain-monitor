@@ -99,6 +99,11 @@ class UplinkTask:
             "version": AGENT_VERSION,
             "hostname": socket.gethostname(),
             "ip": _best_effort_local_ip(),
+            # Lets the bot show "buffered, not sent yet" instead of the
+            # domain list just looking frozen while sending is paused -
+            # the agent keeps capturing locally the whole time, this is
+            # the only way the server can see that it's happening.
+            "buffer_size": self.buffer.size(),
         }
         try:
             resp = await self._client.post("/api/v1/nodes/heartbeat", json=payload)

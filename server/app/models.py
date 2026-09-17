@@ -21,6 +21,10 @@ class Node:
     last_heartbeat_at: datetime | None
     monitoring_enabled: bool
     notifications_enabled: bool
+    notify_destination: str  # "dm" | "group" | "both"
+    notify_group_chat_id: int | None
+    notify_group_topic_id: int | None
+    agent_buffer_size: int | None
 
     def is_online(self, offline_after_seconds: int, now: datetime) -> bool:
         if self.status != "active" or self.last_heartbeat_at is None:

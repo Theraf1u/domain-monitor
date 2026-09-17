@@ -71,6 +71,7 @@ class HeartbeatRequest(BaseModel):
     version: str | None = None
     ip: str | None = None
     hostname: str | None = None
+    buffer_size: int | None = None
 
 
 class HeartbeatResponse(BaseModel):

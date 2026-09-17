@@ -40,9 +40,12 @@ class Notifier:
         self.bot = bot
 
     async def broadcast(self, text: str, parse_mode: str | None = "HTML") -> None:
-        """Sends to every configured admin, independently - one admin
-        having blocked the bot (or a stale/invalid id) never stops the
-        others from being notified."""
+        """Sends to every configured admin's DM, independently - one
+        admin having blocked the bot (or a stale/invalid id) never stops
+        the others from being notified. Used for admin-facing messages
+        that aren't tied to any one node (backup status, etc); per-node
+        alerts go through deliver_for_node() instead, which respects
+        that node's own routing."""
         if self.bot is None:
             return
         for admin_id in self.admin_ids:
@@ -51,6 +54,31 @@ class Notifier:
             except Exception:
                 TELEGRAM_ERRORS_TOTAL.inc()
                 logger.exception("Failed to deliver message to admin %s", admin_id)
+
+    async def deliver_for_node(self, node: Node, text: str, parse_mode: str | None = "HTML") -> None:
+        """Routes a node-scoped alert (new domain, watchlist hit) to
+        wherever THAT node is configured to send them: every admin's DM,
+        a specific group (optionally one forum topic in it), or both.
+        Falls back to DM if "group" is selected but never actually got a
+        chat_id bound yet, so a half-finished setup doesn't just eat
+        notifications silently."""
+        if self.bot is None:
+            return
+        dest = node.notify_destination
+        if dest in ("dm", "both") or (dest == "group" and node.notify_group_chat_id is None):
+            await self.broadcast(text, parse_mode)
+        if dest in ("group", "both") and node.notify_group_chat_id is not None:
+            try:
+                await self.bot.send_message(
+                    node.notify_group_chat_id, text, parse_mode=parse_mode,
+                    message_thread_id=node.notify_group_topic_id,
+                )
+            except Exception:
+                TELEGRAM_ERRORS_TOTAL.inc()
+                logger.exception(
+                    "Failed to deliver notification for node %s to group %s (topic %s)",
+                    node.id, node.notify_group_chat_id, node.notify_group_topic_id,
+                )
 
     def is_globally_enabled(self) -> bool:
         return self.db.get_setting(SETTING_NOTIFICATIONS_ENABLED, "1") == "1"
@@ -83,7 +111,7 @@ class Notifier:
         if self.bot is None or not self.is_watchlist_enabled() or not node.notifications_enabled:
             return
         text = f"🚨 <b>WATCHLIST DOMAIN</b>\n\n<code>{domain}</code>\n\nНода: {node.name}"
-        await self.broadcast(text)
+        await self.deliver_for_node(node, text)
 
     async def run(self) -> None:
         while not self._stopped.is_set():
@@ -107,15 +135,16 @@ class Notifier:
         if self.bot is None:
             return
 
-        by_node: dict[str, list[str]] = {}
+        by_node: dict[int, tuple[Node, list[str]]] = {}
         for node, domain in batch:
-            by_node.setdefault(node.name, []).append(domain)
+            entry = by_node.setdefault(node.id, (node, []))
+            entry[1].append(domain)
 
-        for node_name, domains in by_node.items():
+        for node, domains in by_node.values():
             if len(domains) == 1:
-                text = f"🌐 Новый домен\n\n<code>{domains[0]}</code>\n\nНода: {node_name}"
+                text = f"🌐 Новый домен\n\n<code>{domains[0]}</code>\n\nНода: {node.name}"
             else:
                 lines = "\n".join(f"• <code>{d}</code>" for d in domains[:30])
                 more = f"\n… и ещё {len(domains) - 30}" if len(domains) > 30 else ""
-                text = f"🌐 Обнаружено {len(domains)} новых доменов\n\nНода: {node_name}\n\n{lines}{more}"
-            await self.broadcast(text)
+                text = f"🌐 Обнаружено {len(domains)} новых доменов\n\nНода: {node.name}\n\n{lines}{more}"
+            await self.deliver_for_node(node, text)
