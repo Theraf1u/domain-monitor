@@ -438,12 +438,20 @@ enable_auto_update() {
     echo "1) Ежедневно, в 03:00"
     echo "2) Раз в неделю, воскресенье в 03:00"
     echo "3) Свой график (в формате cron)"
+    echo "0) Отмена"
     local choice schedule
-    read -r -p "Выбор [1-3]: " choice </dev/tty
+    read -r -p "Выбор [0-3]: " choice </dev/tty
     case "$choice" in
         1) schedule="0 3 * * *" ;;
         2) schedule="0 3 * * 0" ;;
-        3) read -r -p "Cron-выражение (например: 0 4 * * *): " schedule </dev/tty ;;
+        3)
+            read -r -p "Cron-выражение (например: 0 4 * * *), пусто - отмена: " schedule </dev/tty
+            if [ -z "$schedule" ]; then
+                echo "Отменено."
+                return 0
+            fi
+            ;;
+        0|"") echo "Отменено."; return 0 ;;
         *) echo "Неверный выбор."; return 1 ;;
     esac
 
