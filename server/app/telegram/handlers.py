@@ -5,6 +5,7 @@ keyboards" rule carried over from the single-node MVP.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot, F, Router
@@ -32,7 +33,7 @@ _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
 class Inputs(StatesGroup):
-    waiting_for_node_name = State()
+    waiting_for_node_rename = State()
     waiting_for_filter_pattern = State()
     waiting_for_filter_check = State()
     waiting_for_export_range = State()
@@ -118,14 +119,20 @@ async def cb_fleet_toggle_sending(call: CallbackQuery, state: FSMContext, db: Da
 # Nodes
 # ------------------------------------------------------------------
 
+_NODES_LEGEND = "🟢 работает   🔴 отозвана/не отвечает   🔵 на паузе"
+
+
 @router.callback_query(F.data == "nodes")
 async def cb_nodes(call: CallbackQuery, db: Database, config: Config) -> None:
     nodes = db.list_nodes()
+    fleet_mon = fleet_control.is_monitoring_enabled(db)
     if not nodes:
         text = "📡 <b>Ноды</b>\n\nПока не добавлено ни одной ноды."
     else:
-        text = "📡 <b>Ноды</b>\n\nВыберите ноду для управления:"
-    await call.message.edit_text(text, parse_mode="HTML", reply_markup=kb.nodes_list(nodes, _online_ids(db, config)))
+        text = f"📡 <b>Ноды</b>\n{_NODES_LEGEND}\n\nВыберите ноду для управления:"
+    await call.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.nodes_list(nodes, _online_ids(db, config), fleet_mon),
+    )
     await call.answer()
 
 
@@ -315,35 +322,60 @@ async def cb_node_delete(call: CallbackQuery, db: Database, config: Config) -> N
 
 
 @router.callback_query(F.data == "node_add")
-async def cb_node_add(call: CallbackQuery, state: FSMContext) -> None:
-    await state.set_state(Inputs.waiting_for_node_name)
+async def cb_node_add(call: CallbackQuery, db: Database, config: Config) -> None:
+    """One tap, zero typing: creates the node with an auto-assigned
+    placeholder name (renamed to its real IP on first heartbeat, see
+    Database.touch_heartbeat) and hands back a ready-to-paste token."""
+    token = generate_node_token()
+    node = db.create_node_auto(hash_token(token))
     await call.message.edit_text(
-        "Введите имя новой ноды (например: <code>Germany-1</code> или её IP):",
-        parse_mode="HTML", reply_markup=kb.cancel_input("nodes"),
+        f"✅ Нода <b>{node.name}</b> создана.\n\n"
+        f"Токен (сохраните, показывается один раз):\n<code>{token}</code>\n\n"
+        f"На новом сервере выполните установщик агента (см. README проекта), указав в мастере:\n"
+        f"Server URL: <code>{config.public_url}</code>\n"
+        f"Node Token: <code>{token}</code>\n\n"
+        f"После первого подключения нода автоматически переименуется в свой IP. "
+        f"Своё имя можно задать в любой момент через карточку ноды («✏️ Переименовать»).",
+        parse_mode="HTML", reply_markup=kb.back_button("nodes"),
     )
     await call.answer()
 
 
-@router.message(Inputs.waiting_for_node_name)
-async def on_node_name_input(message: Message, state: FSMContext, db: Database, config: Config) -> None:
-    name = (message.text or "").strip()
-    await state.clear()
-    if not name or len(name) > 100:
-        await message.answer("Некорректное имя. Открой меню нод и попробуй снова.", reply_markup=kb.back_button("nodes"))
+@router.callback_query(F.data.startswith("node_rename:"))
+async def cb_node_rename(call: CallbackQuery, state: FSMContext, db: Database) -> None:
+    node_id = int(call.data.split(":")[1])
+    node = db.get_node(node_id)
+    if node is None:
+        await call.answer("Нода не найдена", show_alert=True)
         return
-    if db.name_exists(name):
-        await message.answer(f"Нода с именем «{name}» уже существует.", reply_markup=kb.back_button("nodes"))
-        return
+    await state.set_state(Inputs.waiting_for_node_rename)
+    await state.update_data(node_id=node_id)
+    await call.message.edit_text(
+        f"Введите новое имя для ноды <b>{node.name}</b>:",
+        parse_mode="HTML", reply_markup=kb.cancel_input(f"node:{node_id}"),
+    )
+    await call.answer()
 
-    token = generate_node_token()
-    db.create_node(name, hash_token(token))
+
+@router.message(Inputs.waiting_for_node_rename)
+async def on_node_rename_input(message: Message, state: FSMContext, db: Database) -> None:
+    data = await state.get_data()
+    node_id = data.get("node_id")
+    await state.clear()
+    name = (message.text or "").strip()
+    if not node_id:
+        await message.answer("Сессия истекла. Открой меню нод и попробуй снова.", reply_markup=kb.back_button("nodes"))
+        return
+    if not name or len(name) > 100:
+        await message.answer("Некорректное имя. Открой карточку ноды и попробуй снова.", reply_markup=kb.back_button(f"node:{node_id}"))
+        return
+    if not db.rename_node(node_id, name):
+        await message.answer(f"Нода с именем «{name}» уже существует.", reply_markup=kb.back_button(f"node:{node_id}"))
+        return
+    node = db.get_node(node_id)
     await message.answer(
-        f"✅ Нода <b>{name}</b> создана.\n\n"
-        f"Токен (сохраните, показывается один раз):\n<code>{token}</code>\n\n"
-        f"На новом сервере выполните установщик агента (см. README проекта), указав в мастере:\n"
-        f"Server URL: <code>{config.public_url}</code>\n"
-        f"Node Token: <code>{token}</code>",
-        parse_mode="HTML", reply_markup=kb.back_button("nodes"),
+        f"✅ Нода переименована в <b>{node.name}</b>.",
+        parse_mode="HTML", reply_markup=kb.back_button(f"node:{node_id}"),
     )
 
 
@@ -489,6 +521,24 @@ async def cb_data_reset_confirm(call: CallbackQuery, db: Database, config: Confi
 # Stats
 # ------------------------------------------------------------------
 
+def _format_size(num_bytes: int) -> str:
+    value = float(num_bytes)
+    for unit in ("Б", "КБ", "МБ", "ГБ"):
+        if value < 1024 or unit == "ГБ":
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} ГБ"
+
+
+def _database_size_bytes(config: Config) -> int:
+    base = config.database_path
+    return sum(
+        os.path.getsize(candidate)
+        for candidate in (base, base + "-wal", base + "-shm")
+        if os.path.isfile(candidate)
+    )
+
+
 def _stats_text(db: Database, config: Config, period: str) -> str:
     now = datetime.now(timezone.utc)
     since, until = _period_range(period, now)
@@ -513,6 +563,7 @@ def _stats_text(db: Database, config: Config, period: str) -> str:
     buffered_line = (
         f"В буферах агентов (собрано, не отправлено): {buffered_total}\n" if buffered_total else ""
     )
+    db_size_line = f"Размер базы доменов: {_format_size(_database_size_bytes(config))}\n"
 
     return (
         f"📊 <b>Статистика</b> ({period_label})\n\n"
@@ -522,6 +573,7 @@ def _stats_text(db: Database, config: Config, period: str) -> str:
         f"Событий за период: {events_count}\n"
         f"{rate_line}"
         f"{buffered_line}"
+        f"{db_size_line}"
         f"\nАктивные ноды за период:\n{top_lines}"
     )
 

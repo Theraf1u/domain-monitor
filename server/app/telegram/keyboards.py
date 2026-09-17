@@ -5,11 +5,19 @@ interpolated back into a query.
 
 Buttons are colored with the `style` field added in Bot API 9.4 (only
 'danger'/'success'/'primary' are valid - anything else is rejected by
-Telegram, so don't invent other values). Color always follows the ACTION
-the button performs, not the current state: a button offering to stop
-something is danger even while monitoring is happily running, and
-"confirm delete" is danger even though it's the affirmative answer -
-green on a destructive confirm would say the opposite of what it means.
+Telegram, so don't invent other values). Two different rules apply
+depending on what the button IS:
+
+- A plain on/off toggle (monitoring, sending, notifications, watchlist
+  alerts, autobackup) shows its CURRENT STATE, not the action tapping it
+  performs: the label reads "Мониторинг включён"/"выключён" and the
+  color is green while it's on, red while it's off - like a light
+  switch, not a verb. See _toggle_style()/_toggle_label().
+- A one-shot destructive action (delete, revoke, "confirm delete") is
+  colored by what it DOES regardless of any state: "✅ Да, удалить" is
+  danger even though it's the affirmative answer, because green on a
+  destructive confirm would say the opposite of what it means.
+
 Purely navigational buttons (Назад/Отмена) are left unstyled."""
 from __future__ import annotations
 
@@ -17,6 +25,14 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.models import FilterRule, Node
+
+
+def _toggle_style(enabled: bool) -> str:
+    return "success" if enabled else "danger"
+
+
+def _toggle_label(on_text: str, off_text: str, enabled: bool) -> str:
+    return f"🟢 {on_text}" if enabled else f"🔴 {off_text}"
 
 PATTERN_TAG = {"exact": "точно", "suffix": "поддомены", "wildcard": "шаблон"}
 
@@ -46,10 +62,10 @@ def main_menu(monitoring_enabled: bool = True, sending_enabled: bool = True) -> 
     b.button(text="🔍 Фильтры", callback_data="filters")
     b.button(text="⚙️ Настройки", callback_data="settings")
     b.button(text="💾 Бэкапы", callback_data="backups")
-    mon_label = "⏸ Остановить мониторинг" if monitoring_enabled else "▶ Возобновить мониторинг"
-    send_label = "⏸ Остановить отправку доменов" if sending_enabled else "▶ Возобновить отправку доменов"
-    b.button(text=mon_label, callback_data="fleet_toggle_monitoring", style="danger" if monitoring_enabled else "success")
-    b.button(text=send_label, callback_data="fleet_toggle_sending", style="danger" if sending_enabled else "success")
+    mon_label = _toggle_label("Мониторинг включён", "Мониторинг выключен", monitoring_enabled)
+    send_label = _toggle_label("Отправка доменов включена", "Отправка доменов выключена", sending_enabled)
+    b.button(text=mon_label, callback_data="fleet_toggle_monitoring", style=_toggle_style(monitoring_enabled))
+    b.button(text=send_label, callback_data="fleet_toggle_sending", style=_toggle_style(sending_enabled))
     b.adjust(2, 2, 2, 1, 1, 1)
     return b.as_markup()
 
@@ -80,15 +96,25 @@ def cancel_input(target: str = "main") -> InlineKeyboardMarkup:
 # Nodes
 # ------------------------------------------------------------------
 
-def nodes_list(nodes: list[Node], online_ids: set[int]) -> InlineKeyboardMarkup:
+def nodes_list(nodes: list[Node], online_ids: set[int], fleet_monitoring_enabled: bool = True) -> InlineKeyboardMarkup:
+    """Node status is shown by button COLOR, not an emoji dot: green =
+    agent online and actively monitoring, red = revoked or not
+    responding, blue = online but paused (either this node's own
+    monitoring toggle or the fleet-wide one is off). The legend for
+    this lives in the screen's text (see handlers._nodes_legend), since
+    Telegram gives us only three button colors to work with."""
     b = InlineKeyboardBuilder()
     for node in nodes:
-        dot = "🟢" if node.id in online_ids else "🔴"
-        label = f"{dot} {node.name}"
         if node.status == "revoked":
-            label = f"⛔ {node.name}"
-        b.button(text=label, callback_data=f"node:{node.id}")
-    b.button(text="➕ Добавить", callback_data="node_add", style="success")
+            label, style = f"{node.name} (отозвана)", "danger"
+        elif node.id not in online_ids:
+            label, style = f"{node.name} (не отвечает)", "danger"
+        elif not (node.monitoring_enabled and fleet_monitoring_enabled):
+            label, style = f"{node.name} (на паузе)", "primary"
+        else:
+            label, style = node.name, "success"
+        b.button(text=label, callback_data=f"node:{node.id}", style=style)
+    b.button(text="➕ Добавить", callback_data="node_add", style="primary")
     b.button(text="⬅️ Назад", callback_data="main")
     b.adjust(1)
     return b.as_markup()
@@ -103,18 +129,15 @@ NOTIFY_DEST_LABELS = {
 
 def node_card(node: Node) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    mon_label = "⏸ Мониторинг (вкл)" if node.monitoring_enabled else "▶ Мониторинг (выкл)"
-    notif_label = "🔔 Уведомления (вкл)" if node.notifications_enabled else "🔕 Уведомления (выкл)"
+    mon_label = _toggle_label("Мониторинг включён", "Мониторинг выключен", node.monitoring_enabled)
+    notif_label = _toggle_label("Уведомления включены", "Уведомления выключены", node.notifications_enabled)
+    b.button(text=mon_label, callback_data=f"node_toggle_mon:{node.id}", style=_toggle_style(node.monitoring_enabled))
     b.button(
-        text=mon_label, callback_data=f"node_toggle_mon:{node.id}",
-        style="danger" if node.monitoring_enabled else "success",
-    )
-    b.button(
-        text=notif_label, callback_data=f"node_toggle_notif:{node.id}",
-        style="danger" if node.notifications_enabled else "success",
+        text=notif_label, callback_data=f"node_toggle_notif:{node.id}", style=_toggle_style(node.notifications_enabled),
     )
     dest_label = NOTIFY_DEST_LABELS.get(node.notify_destination, node.notify_destination)
     b.button(text=f"📍 Куда слать: {dest_label}", callback_data=f"node_notify_dest:{node.id}", style="primary")
+    b.button(text="✏️ Переименовать", callback_data=f"node_rename:{node.id}", style="primary")
     if node.status == "active":
         b.button(text="🔑 Обновить токен", callback_data=f"node_regen:{node.id}", style="primary")
         b.button(text="⛔ Отозвать", callback_data=f"node_revoke:{node.id}", style="danger")
@@ -226,8 +249,8 @@ _PRESET_MODES = [("instant", "Instant"), ("5", "Batch 5s"), ("15", "Batch 15s"),
 
 def notify_menu(current_mode: str, global_enabled: bool) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    toggle = "🔕 Выключить всё" if global_enabled else "🔔 Включить всё"
-    b.button(text=toggle, callback_data="notify_toggle_global", style="danger" if global_enabled else "success")
+    toggle = _toggle_label("Уведомления включены", "Уведомления выключены", global_enabled)
+    b.button(text=toggle, callback_data="notify_toggle_global", style=_toggle_style(global_enabled))
     for value, label in _PRESET_MODES:
         prefix = "✅ " if value == current_mode else ""
         b.button(text=f"{prefix}{label}", callback_data=f"notify_mode:{value}")
@@ -247,11 +270,8 @@ def settings_menu(retention_days: int, offline_seconds: int, watchlist_enabled: 
     b = InlineKeyboardBuilder()
     b.button(text=f"🗓 Хранение событий: {retention_days} дн.", callback_data="settings_retention", style="primary")
     b.button(text=f"⏱ Offline через: {offline_seconds} сек", callback_data="settings_offline", style="primary")
-    wl_label = "🔔 Watch-уведомления (вкл)" if watchlist_enabled else "🔕 Watch-уведомления (выкл)"
-    b.button(
-        text=wl_label, callback_data="settings_toggle_watchlist",
-        style="danger" if watchlist_enabled else "success",
-    )
+    wl_label = _toggle_label("Watch-уведомления включены", "Watch-уведомления выключены", watchlist_enabled)
+    b.button(text=wl_label, callback_data="settings_toggle_watchlist", style=_toggle_style(watchlist_enabled))
     b.button(text="⬅️ Назад", callback_data="main")
     b.adjust(1, 1, 1, 1)
     return b.as_markup()
@@ -349,8 +369,8 @@ BACKUP_DEST_LABELS = {
 
 def backups_menu(enabled: bool, interval_hours: int, keep_count: int, destination: str) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    toggle = "⏸ Выключить автобэкап" if enabled else "▶ Включить автобэкап"
-    b.button(text=toggle, callback_data="backup_toggle", style="danger" if enabled else "success")
+    toggle = _toggle_label("Автобэкап включён", "Автобэкап выключен", enabled)
+    b.button(text=toggle, callback_data="backup_toggle", style=_toggle_style(enabled))
     b.button(text=f"⏱ Периодичность: {interval_hours} ч.", callback_data="backup_set_interval", style="primary")
     b.button(text=f"🗂 Хранить копий: {keep_count}", callback_data="backup_set_keep", style="primary")
     dest_label = BACKUP_DEST_LABELS.get(destination, destination)

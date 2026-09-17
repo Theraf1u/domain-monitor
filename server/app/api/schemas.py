@@ -12,11 +12,16 @@ _VALID_SOURCES = {"tls_sni", "dns", "http_host", "quic", "xray_log"}
 
 
 class NodeCreateRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
+    # Omit name entirely for the one-tap flow: the server auto-assigns a
+    # placeholder (`нода-{id}`), later replaced with the node's real IP
+    # on its first heartbeat.
+    name: str | None = Field(default=None, min_length=1, max_length=100)
 
     @field_validator("name")
     @classmethod
-    def _clean_name(cls, v: str) -> str:
+    def _clean_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
         v = v.strip()
         if not v:
             raise ValueError("name must not be blank")

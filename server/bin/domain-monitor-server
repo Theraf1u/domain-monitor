@@ -12,6 +12,7 @@
 #   domain-monitor-server doctor     запустить диагностику
 #   domain-monitor-server backup     сделать бэкап БД + конфига в ./backups
 #   domain-monitor-server restore <f> восстановить из файла бэкапа
+#   domain-monitor-server add-node   добавить ноду в одно действие (без имени)
 set -uo pipefail
 
 # Resolve through the /usr/local/bin symlink the installer creates - a
@@ -37,7 +38,8 @@ case "$cmd" in
     doctor)    bash "$SCRIPTS_DIR/doctor.sh" ;;
     backup)    bash "$SCRIPTS_DIR/backup.sh" ;;
     restore)   bash "$SCRIPTS_DIR/restore.sh" "${2:-}" ;;
-    -h|--help|help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' ;;
+    add-node)  bash "$SCRIPTS_DIR/add_node.sh" ;;
+    -h|--help|help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' ;;
     *)
         echo "Неизвестная команда: $cmd" >&2
         echo "Запусти 'domain-monitor-server help' для справки." >&2

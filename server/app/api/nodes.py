@@ -25,10 +25,13 @@ router = APIRouter(prefix="/api/v1/nodes", tags=["nodes"])
 
 @router.post("", response_model=NodeCreateResponse, dependencies=[Depends(require_admin)])
 def create_node(body: NodeCreateRequest, db: Database = Depends(get_db)) -> NodeCreateResponse:
-    if db.name_exists(body.name):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A node with this name already exists")
     token = generate_node_token()
-    node = db.create_node(body.name, hash_token(token))
+    if body.name is None:
+        node = db.create_node_auto(hash_token(token))
+    else:
+        if db.name_exists(body.name):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A node with this name already exists")
+        node = db.create_node(body.name, hash_token(token))
     return NodeCreateResponse(id=node.id, name=node.name, token=token)
 
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
@@ -20,6 +21,11 @@ from app.models import Domain, Event, FilterRule, Node
 logger = logging.getLogger(__name__)
 
 _MIGRATIONS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "migrations")
+
+# Placeholder name auto-assigned by create_node_auto(), replaced by
+# touch_heartbeat() with the node's real IP on its first heartbeat -
+# matched here so that a user-chosen name is never clobbered.
+_AUTO_NAME_RE = re.compile(r"^нода-\d+$")
 
 
 def _now() -> str:
@@ -89,6 +95,41 @@ class Database:
             self._conn.commit()
             cur = self._conn.execute("SELECT * FROM nodes WHERE name = ?", (name,))
             return self._row_to_node(cur.fetchone())
+
+    def create_node_auto(self, token_hash: str) -> Node:
+        """Creates a node without requiring a name up front - used by the
+        one-tap "Добавить" flow (bot + CLI). Inserts with a temporary
+        unique placeholder (the insert's own rowid can't be known before
+        the insert happens), then renames it to `нода-{id}` so the node
+        is immediately identifiable in lists while it awaits its first
+        heartbeat, at which point touch_heartbeat() renames it again to
+        the node's real IP."""
+        with self._lock:
+            placeholder = f"__pending__{_now()}"
+            self._conn.execute(
+                "INSERT INTO nodes (name, token_hash, status, created_at, monitoring_enabled, "
+                "notifications_enabled) VALUES (?, ?, 'active', ?, 1, 1)",
+                (placeholder, token_hash, _now()),
+            )
+            node_id = self._conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            final_name = f"нода-{node_id}"
+            self._conn.execute("UPDATE nodes SET name = ? WHERE id = ?", (final_name, node_id))
+            self._conn.commit()
+            cur = self._conn.execute("SELECT * FROM nodes WHERE id = ?", (node_id,))
+            return self._row_to_node(cur.fetchone())
+
+    def rename_node(self, node_id: int, new_name: str) -> bool:
+        """Returns False (no change made) if the name is already taken by
+        a different node."""
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT 1 FROM nodes WHERE name = ? AND id != ?", (new_name, node_id)
+            )
+            if cur.fetchone() is not None:
+                return False
+            self._conn.execute("UPDATE nodes SET name = ? WHERE id = ?", (new_name, node_id))
+            self._conn.commit()
+            return True
 
     def name_exists(self, name: str) -> bool:
         with self._lock:
@@ -179,6 +220,17 @@ class Database:
                     (now, now, node_id),
                 )
             self._conn.commit()
+
+            if ip:
+                row = self._conn.execute("SELECT name FROM nodes WHERE id = ?", (node_id,)).fetchone()
+                if row is not None and _AUTO_NAME_RE.match(row["name"]):
+                    taken = self._conn.execute(
+                        "SELECT 1 FROM nodes WHERE name = ? AND id != ?", (ip, node_id)
+                    ).fetchone()
+                    if taken is None:
+                        self._conn.execute("UPDATE nodes SET name = ? WHERE id = ?", (ip, node_id))
+                        self._conn.commit()
+                    # else: ip already taken by another node - keep the placeholder name.
 
     def touch_last_seen(self, node_id: int) -> None:
         with self._lock:
