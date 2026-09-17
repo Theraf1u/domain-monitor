@@ -35,7 +35,7 @@ C_OK='\033[0;32m'
 C_OFF='\033[0;90m'
 C_ERR='\033[0;31m'
 
-BOX_WIDTH=58
+BOX_WIDTH=62
 
 hr() { printf '─%.0s' $(seq 1 "$BOX_WIDTH"); }
 box_top()    { printf "${C_BORDER}┌%b┐${C_RESET}\n" "$(hr)"; }
@@ -107,12 +107,25 @@ component_status() {
     fi
 }
 
+# "THERAF1U" rendered in the ANSI Shadow figlet font.
+print_logo() {
+    printf "${C_NICK}"
+    cat <<'LOGO'
+████████╗██╗  ██╗███████╗██████╗  █████╗ ███████╗ ██╗██╗   ██╗
+╚══██╔══╝██║  ██║██╔════╝██╔══██╗██╔══██╗██╔════╝███║██║   ██║
+   ██║   ███████║█████╗  ██████╔╝███████║█████╗  ╚██║██║   ██║
+   ██║   ██╔══██║██╔══╝  ██╔══██╗██╔══██║██╔══╝   ██║██║   ██║
+   ██║   ██║  ██║███████╗██║  ██║██║  ██║██║      ██║╚██████╔╝
+   ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝      ╚═╝ ╚═════╝
+LOGO
+    printf "${C_RESET}"
+}
+
 print_banner() {
     clear 2>/dev/null || true
     echo
-    box_top
-    box_line "THERAF1U | Domain Monitor" "${C_NICK}${C_BOLD}THERAF1U${C_RESET} ${C_SUB}| Domain Monitor${C_RESET}"
-    box_bottom
+    print_logo
+    printf "                                     ${C_SUB}Domain Monitor${C_RESET}\n"
     echo
     printf "${C_LABEL}Запуск из любой точки сервера:${C_RESET} ${C_BOLD}%s${C_RESET}\n" "dm"
     printf "${C_LABEL}Server:${C_RESET} %b   ${C_LABEL}Agent:${C_RESET} %b\n" "$(component_status server)" "$(component_status agent)"
