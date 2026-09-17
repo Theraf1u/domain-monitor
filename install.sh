@@ -125,7 +125,7 @@ print_banner() {
     clear 2>/dev/null || true
     echo
     print_logo
-    printf "                                     ${C_SUB}Domain Monitor${C_RESET}\n"
+    printf "${C_SUB}Domain Monitor${C_RESET}\n"
     echo
     printf "${C_LABEL}Запуск из любой точки сервера:${C_RESET} ${C_BOLD}%s${C_RESET}\n" "dm"
     printf "${C_LABEL}Server:${C_RESET} %b   ${C_LABEL}Agent:${C_RESET} %b\n" "$(component_status server)" "$(component_status agent)"
