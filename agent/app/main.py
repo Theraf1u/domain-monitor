@@ -8,6 +8,7 @@ import signal
 from app.buffer import Buffer
 from app.config import ConfigError, load_config
 from app.logging_config import setup_logging
+from app.remote_control import RemoteControl
 from app.sniffer import Sniffer
 from app.uplink import UplinkTask
 
@@ -25,8 +26,9 @@ async def _run() -> None:
     buffer = Buffer(config.database_path, config.max_buffer_size)
     buffer.migrate()
 
-    sniffer = Sniffer(buffer, config.interface, config.tshark_path, config.sources)
-    uplink = UplinkTask(config, buffer)
+    remote_control = RemoteControl()
+    sniffer = Sniffer(buffer, config.interface, config.tshark_path, config.sources, remote_control)
+    uplink = UplinkTask(config, buffer, remote_control)
 
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()

@@ -14,6 +14,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
+from app import fleet_control
 from app.config import Config
 from app.database import Database
 from app.notifier import Notifier
@@ -40,22 +41,44 @@ def _online_ids(db: Database, config: Config) -> set[int]:
 # ------------------------------------------------------------------
 
 @router.message(Command("start"))
-async def cmd_start(message: Message, state: FSMContext) -> None:
+async def cmd_start(message: Message, state: FSMContext, db: Database) -> None:
     await state.clear()
     await message.answer(
         "🖥 <b>Domain Monitor</b>\n\nЦентральная панель управления нодами и доменами.",
-        parse_mode="HTML", reply_markup=kb.main_menu(),
+        parse_mode="HTML",
+        reply_markup=kb.main_menu(fleet_control.is_monitoring_enabled(db), fleet_control.is_sending_enabled(db)),
     )
 
 
 @router.callback_query(F.data == "main")
-async def cb_main(call: CallbackQuery, state: FSMContext) -> None:
+async def cb_main(call: CallbackQuery, state: FSMContext, db: Database) -> None:
     await state.clear()
     await call.message.edit_text(
         "🖥 <b>Domain Monitor</b>\n\nЦентральная панель управления нодами и доменами.",
-        parse_mode="HTML", reply_markup=kb.main_menu(),
+        parse_mode="HTML",
+        reply_markup=kb.main_menu(fleet_control.is_monitoring_enabled(db), fleet_control.is_sending_enabled(db)),
     )
     await call.answer()
+
+
+@router.callback_query(F.data == "fleet_toggle_monitoring")
+async def cb_fleet_toggle_monitoring(call: CallbackQuery, state: FSMContext, db: Database) -> None:
+    fleet_control.set_monitoring_enabled(db, not fleet_control.is_monitoring_enabled(db))
+    await call.answer(
+        "⏸ Мониторинг остановлен на всех нодах" if not fleet_control.is_monitoring_enabled(db)
+        else "▶ Мониторинг возобновлён на всех нодах"
+    )
+    await cb_main(call, state, db)
+
+
+@router.callback_query(F.data == "fleet_toggle_sending")
+async def cb_fleet_toggle_sending(call: CallbackQuery, state: FSMContext, db: Database) -> None:
+    fleet_control.set_sending_enabled(db, not fleet_control.is_sending_enabled(db))
+    await call.answer(
+        "⏸ Отправка доменов остановлена на всех нодах" if not fleet_control.is_sending_enabled(db)
+        else "▶ Отправка доменов возобновлена на всех нодах"
+    )
+    await cb_main(call, state, db)
 
 
 # ------------------------------------------------------------------
@@ -416,7 +439,10 @@ async def cb_domain_copy(call: CallbackQuery, db: Database) -> None:
 # ------------------------------------------------------------------
 
 @router.message()
-async def fallback(message: Message, state: FSMContext) -> None:
+async def fallback(message: Message, state: FSMContext, db: Database) -> None:
     if await state.get_state() is not None:
         return  # an FSM handler above should have matched; do nothing extra
-    await message.answer("Используйте меню ниже:", reply_markup=kb.main_menu())
+    await message.answer(
+        "Используйте меню ниже:",
+        reply_markup=kb.main_menu(fleet_control.is_monitoring_enabled(db), fleet_control.is_sending_enabled(db)),
+    )

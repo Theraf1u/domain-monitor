@@ -142,9 +142,9 @@ print_banner() {
 
 print_menu_box() {
     box_top
-    box_line "1) Agent        - только сниффер трафика" "${C_NUM}1)${C_RESET} Agent        - только сниффер трафика"
-    box_line "2) Server       - сервер + Telegram-бот" "${C_NUM}2)${C_RESET} Server       - сервер + Telegram-бот"
-    box_line "3) Оба          - сервер и агент на этой машине" "${C_NUM}3)${C_RESET} Оба          - сервер и агент на этой машине"
+    box_line "1) Оба          - сервер (бот) и агент на этой машине" "${C_NUM}1)${C_RESET} Оба          - сервер (бот) и агент на этой машине"
+    box_line "2) Agent        - только сниффер трафика" "${C_NUM}2)${C_RESET} Agent        - только сниффер трафика"
+    box_line "3) Server       - сервер + Telegram-бот" "${C_NUM}3)${C_RESET} Server       - сервер + Telegram-бот"
     box_line "4) Статус       - что установлено и работает" "${C_NUM}4)${C_RESET} Статус       - что установлено и работает"
     box_line "5) Диагностика  - проверить установленные компоненты" "${C_NUM}5)${C_RESET} Диагностика  - проверить установленные компоненты"
     box_line "6) Удалить всё  - снести всё, что тут стоит" "${C_NUM}6)${C_RESET} Удалить всё  - снести всё, что тут стоит"
@@ -186,9 +186,9 @@ show_menu() {
     local choice
     read -r -p "$(printf "${C_LABEL}Выбери действие${C_RESET} ${C_OFF}[1-7]${C_RESET}: ")" choice </dev/tty
     case "$choice" in
-        1) exec bash "$PROJECT_DIR/agent/install-agent.sh" ;;
-        2) exec bash "$PROJECT_DIR/server/install.sh" ;;
-        3) install_both ;;
+        1) install_both ;;
+        2) exec bash "$PROJECT_DIR/agent/install-agent.sh" ;;
+        3) exec bash "$PROJECT_DIR/server/install.sh" ;;
         4) show_status; show_menu ;;
         5) run_doctor; show_menu ;;
         6) uninstall_all ;;

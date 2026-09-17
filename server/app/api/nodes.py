@@ -5,9 +5,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from app import fleet_control
 from app.api.deps import get_config, get_db, require_admin, require_node
 from app.api.schemas import (
     HeartbeatRequest,
+    HeartbeatResponse,
     NodeCreateRequest,
     NodeCreateResponse,
     NodeResponse,
@@ -90,8 +92,12 @@ def delete_node(node_id: int, db: Database = Depends(get_db)) -> None:
     db.delete_node(node_id)
 
 
-@router.post("/heartbeat", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+@router.post("/heartbeat", response_model=HeartbeatResponse)
 def heartbeat(
     body: HeartbeatRequest, node: Node = Depends(require_node), db: Database = Depends(get_db),
-) -> None:
+) -> HeartbeatResponse:
     db.touch_heartbeat(node.id, version=body.version, ip=body.ip, hostname=body.hostname)
+    return HeartbeatResponse(
+        monitoring_enabled=node.monitoring_enabled and fleet_control.is_monitoring_enabled(db),
+        sending_enabled=fleet_control.is_sending_enabled(db),
+    )

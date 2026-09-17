@@ -13,6 +13,7 @@ import httpx
 
 from app.buffer import Buffer
 from app.config import Config
+from app.remote_control import RemoteControl
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +23,10 @@ _MAX_BACKOFF_SECONDS = 120
 
 
 class UplinkTask:
-    def __init__(self, config: Config, buffer: Buffer) -> None:
+    def __init__(self, config: Config, buffer: Buffer, remote_control: RemoteControl) -> None:
         self.config = config
         self.buffer = buffer
+        self.remote_control = remote_control
         self._stopped = asyncio.Event()
         self._client = httpx.AsyncClient(
             base_url=config.server_url,
@@ -35,7 +37,13 @@ class UplinkTask:
     async def run(self) -> None:
         backoff = self.config.batch_interval_seconds
         while not self._stopped.is_set():
-            sent = await self._send_pending_batch()
+            if not self.remote_control.sending_enabled:
+                # Paused from Telegram - leave the outbox alone (it keeps
+                # accumulating, bounded by max_buffer_size) and just wait
+                # for the next heartbeat to possibly clear the flag.
+                sent = 0
+            else:
+                sent = await self._send_pending_batch()
             if sent is None:
                 backoff = min(backoff * 2, _MAX_BACKOFF_SECONDS)
             else:
@@ -95,10 +103,21 @@ class UplinkTask:
         try:
             resp = await self._client.post("/api/v1/nodes/heartbeat", json=payload)
             resp.raise_for_status()
+            self._apply_remote_control(resp)
             return True
         except httpx.HTTPError as exc:
             logger.debug("Heartbeat failed: %s", exc)
             return False
+
+    def _apply_remote_control(self, resp: httpx.Response) -> None:
+        try:
+            body = resp.json()
+        except ValueError:
+            return  # older server without a heartbeat body - leave flags as they are
+        if "monitoring_enabled" in body:
+            self.remote_control.monitoring_enabled = bool(body["monitoring_enabled"])
+        if "sending_enabled" in body:
+            self.remote_control.sending_enabled = bool(body["sending_enabled"])
 
 
 def _best_effort_local_ip() -> str | None:

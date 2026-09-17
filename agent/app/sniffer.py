@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 
 from app.buffer import Buffer
 from app.filters import normalize_domain
+from app.remote_control import RemoteControl
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,11 @@ logger = logging.getLogger(__name__)
 # be. Losing ~1-2s of capture during the swap is a fine trade for a
 # process that can no longer grow without bound.
 _MAX_SESSION_SECONDS = 600
+
+# How often a paused worker checks whether monitoring has been
+# re-enabled from Telegram, and how often a running worker checks
+# whether it should stop mid-capture.
+_PAUSE_POLL_SECONDS = 5
 
 
 @dataclass(frozen=True)
@@ -75,18 +81,26 @@ def resolve_sources(raw: str) -> list[_SourceSpec]:
 class _SourceWorker:
     """Runs one tshark subprocess for one source, restarting it on crash."""
 
-    def __init__(self, spec: _SourceSpec, buffer: Buffer, interface: str, tshark_path: str) -> None:
+    def __init__(
+        self, spec: _SourceSpec, buffer: Buffer, interface: str, tshark_path: str, remote_control: RemoteControl,
+    ) -> None:
         self.spec = spec
         self.buffer = buffer
         self.interface = interface
         self.tshark_path = tshark_path
+        self.remote_control = remote_control
         self._process: asyncio.subprocess.Process | None = None
         self._stopped = asyncio.Event()
 
     async def run(self) -> None:
         while not self._stopped.is_set():
+            if not self.remote_control.monitoring_enabled:
+                # Paused from Telegram - don't even start tshark; just
+                # poll until it's re-enabled or we're told to shut down.
+                await asyncio.sleep(_PAUSE_POLL_SECONDS)
+                continue
             try:
-                await asyncio.wait_for(self._run_once(), timeout=_MAX_SESSION_SECONDS)
+                await asyncio.wait_for(self._run_once_or_pause(), timeout=_MAX_SESSION_SECONDS)
             except asyncio.TimeoutError:
                 logger.info(
                     "Sniffer source %s: periodic restart after %ss (bounds long-capture state growth)",
@@ -98,6 +112,26 @@ class _SourceWorker:
             except Exception:
                 logger.exception("Sniffer source %s crashed, restarting in 5s", self.spec.name)
                 await asyncio.sleep(5)
+
+    async def _run_once_or_pause(self) -> None:
+        """Runs one tshark session, but stops it early (without treating
+        that as a crash) if monitoring gets disabled mid-capture."""
+        capture_task = asyncio.create_task(self._run_once())
+        pause_task = asyncio.create_task(self._wait_until_paused())
+        done, _ = await asyncio.wait({capture_task, pause_task}, return_when=asyncio.FIRST_COMPLETED)
+        if pause_task in done:
+            logger.info("Sniffer source %s: monitoring paused from Telegram", self.spec.name)
+            await self._terminate_process()
+            capture_task.cancel()
+            await asyncio.gather(capture_task, return_exceptions=True)
+        else:
+            pause_task.cancel()
+            await asyncio.gather(pause_task, return_exceptions=True)
+            capture_task.result()  # re-raise if _run_once() itself failed
+
+    async def _wait_until_paused(self) -> None:
+        while self.remote_control.monitoring_enabled:
+            await asyncio.sleep(_PAUSE_POLL_SECONDS)
 
     async def stop(self) -> None:
         self._stopped.set()
@@ -185,9 +219,13 @@ class _SourceWorker:
 class Sniffer:
     """Owns one _SourceWorker per enabled source."""
 
-    def __init__(self, buffer: Buffer, interface: str, tshark_path: str, sources: list[str]) -> None:
+    def __init__(
+        self, buffer: Buffer, interface: str, tshark_path: str, sources: list[str], remote_control: RemoteControl,
+    ) -> None:
         specs = resolve_sources(",".join(sources))
-        self._workers = [_SourceWorker(spec, buffer, interface, tshark_path) for spec in specs]
+        self._workers = [
+            _SourceWorker(spec, buffer, interface, tshark_path, remote_control) for spec in specs
+        ]
         self._tasks: list[asyncio.Task] = []
 
     async def run(self) -> None:

@@ -9,8 +9,9 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
+from app import fleet_control
 from app.api.deps import get_db, get_notifier, require_node
 from app.api.schemas import EventBatchRequest, EventBatchResponse
 from app.database import Database
@@ -29,6 +30,17 @@ async def ingest_events(
     request: Request, body: EventBatchRequest, node: Node = Depends(require_node), db: Database = Depends(get_db),
     notifier: Notifier = Depends(get_notifier),
 ) -> EventBatchResponse:
+    if not fleet_control.is_sending_enabled(db):
+        # Belt-and-suspenders: an up-to-date agent already stops calling
+        # this endpoint once "sending" is paused from Telegram, but an
+        # older agent that hasn't picked up the flag yet (or ignores it)
+        # shouldn't be able to keep writing events while it's off. A real
+        # error (not a 200 with accepted=0) matters here: the agent only
+        # clears a batch from its local outbox after a successful
+        # response, so this has to fail the same way an outage would, or
+        # the agent would think the events were saved and drop them.
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="Event sending is currently paused")
+
     broadcaster = getattr(request.app.state, "broadcaster", None)
     rules = await asyncio.to_thread(db.all_filter_rules_cached)
     new_domains: list[str] = []

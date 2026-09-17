@@ -10,7 +10,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from app.models import Node
 
 
-def main_menu() -> InlineKeyboardMarkup:
+def main_menu(monitoring_enabled: bool = True, sending_enabled: bool = True) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="📡 Ноды", callback_data="nodes")
     b.button(text="🌐 Домены", callback_data="domains")
@@ -18,7 +18,11 @@ def main_menu() -> InlineKeyboardMarkup:
     b.button(text="🔔 Уведомления", callback_data="notify_menu")
     b.button(text="🔍 Фильтры", callback_data="filters")
     b.button(text="⚙️ Настройки", callback_data="settings")
-    b.adjust(2, 2, 2)
+    mon_label = "⏸ Остановить мониторинг" if monitoring_enabled else "▶ Возобновить мониторинг"
+    send_label = "⏸ Остановить отправку доменов" if sending_enabled else "▶ Возобновить отправку доменов"
+    b.button(text=mon_label, callback_data="fleet_toggle_monitoring")
+    b.button(text=send_label, callback_data="fleet_toggle_sending")
+    b.adjust(2, 2, 2, 1, 1)
     return b.as_markup()
 
 

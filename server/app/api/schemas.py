@@ -73,6 +73,14 @@ class HeartbeatRequest(BaseModel):
     hostname: str | None = None
 
 
+class HeartbeatResponse(BaseModel):
+    # Effective state the agent should apply immediately - monitoring
+    # already folds in both the per-node and fleet-wide switches, so the
+    # agent doesn't need to know that distinction exists at all.
+    monitoring_enabled: bool
+    sending_enabled: bool
+
+
 class EventIn(BaseModel):
     domain: str
     occurred_at: datetime | None = None
