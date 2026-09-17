@@ -21,7 +21,7 @@ from app.logging_config import setup_logging
 from app.metrics import DOMAINS_TOTAL, NODES_ONLINE, NODES_TOTAL
 from app.notifier import Notifier
 from app.retention import RetentionTask
-from app.telegram.bot import build_bot_and_dispatcher, configure_bot_commands
+from app.telegram.bot import build_bot_and_dispatcher, configure_bot_profile
 
 logger = logging.getLogger(__name__)
 
@@ -78,11 +78,11 @@ async def lifespan(app: FastAPI):
     bot, dp = build_bot_and_dispatcher(config, db, notifier)
     notifier.set_bot(bot)
     try:
-        await configure_bot_commands(bot)
+        await configure_bot_profile(bot)
     except Exception:
-        # Cosmetic (command hint + menu button) - never worth failing
-        # server startup over a transient Telegram API hiccup.
-        logger.exception("Failed to configure bot commands/menu button - continuing anyway")
+        # Cosmetic (command hint, menu button, description, photo) - never
+        # worth failing server startup over a transient Telegram API hiccup.
+        logger.exception("Failed to configure bot profile - continuing anyway")
     background_tasks.append(asyncio.create_task(_run_polling_forever(dp, bot, stop_polling)))
     logger.info("Telegram bot enabled (admin_id=%s)", config.admin_id)
 
