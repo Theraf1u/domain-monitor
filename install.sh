@@ -51,10 +51,11 @@ show_menu() {
     echo
     echo "== Domain Monitor =="
     echo
-    echo "1) Agent   - только сниффер трафика (ставится на каждую VPN-ноду)"
-    echo "2) Server  - только сервер + Telegram-бот (центральная точка управления)"
-    echo "3) Оба     - сервер и агент вместе, на этой же машине"
-    echo "4) Выход"
+    echo "1) Agent        - только сниффер трафика (ставится на каждую VPN-ноду)"
+    echo "2) Server       - только сервер + Telegram-бот (центральная точка управления)"
+    echo "3) Оба          - сервер и агент вместе, на этой же машине"
+    echo "4) Удалить всё  - снести контейнеры/образы/данные/CLI/папку проекта"
+    echo "5) Выход"
     echo
     local choice
     read -r -p "> " choice </dev/tty
@@ -62,7 +63,8 @@ show_menu() {
         1) exec bash "$PROJECT_DIR/agent/install-agent.sh" ;;
         2) exec bash "$PROJECT_DIR/server/install.sh" ;;
         3) install_both ;;
-        4) exit 0 ;;
+        4) uninstall_all ;;
+        5) exit 0 ;;
         *) echo "Неверный выбор."; show_menu ;;
     esac
 }
@@ -149,6 +151,49 @@ install_both() {
     echo "[OK] Server + Agent установлены и запущены на этой машине."
     echo "     Открой бота в Telegram и нажми /start - нода '${node_name}' уже там."
     echo "     Статус: domain-monitor-server status / domain-monitor-agent status"
+}
+
+uninstall_all() {
+    echo
+    echo "Это удалит с этой машины ВСЁ, что относится к Domain Monitor:"
+    echo "  - контейнеры и образы domain-monitor-server / domain-monitor-agent"
+    echo "  - их данные (база нод/доменов на сервере, локальный буфер агента) и .env"
+    echo "  - CLI-команды (/usr/local/bin/domain-monitor-server, domain-monitor-agent)"
+    echo "  - всю папку проекта: $PROJECT_DIR"
+    echo
+    local confirm
+    read -r -p "Продолжить? (yes/no): " confirm </dev/tty
+    if [[ ! "$confirm" =~ ^[Yy] ]]; then
+        echo "Отменено."
+        return
+    fi
+
+    for component in server agent; do
+        if [ -f "$PROJECT_DIR/$component/docker-compose.yml" ]; then
+            echo "[*] Останавливаю $component ..."
+            (
+                cd "$PROJECT_DIR/$component" || exit 0
+                # shellcheck source=./server/scripts/lib.sh
+                source "scripts/lib.sh" 2>/dev/null
+                compose down --rmi local 2>/dev/null
+            ) || true
+        fi
+    done
+
+    # Belt-and-suspenders: in case compose's own project bookkeeping was
+    # stale (e.g. .env got edited/moved since the container was created)
+    # and `compose down` above didn't find it.
+    docker rm -f domain-monitor-server domain-monitor-agent >/dev/null 2>&1 || true
+    docker rmi domain-monitor-server:latest domain-monitor-agent:latest >/dev/null 2>&1 || true
+
+    rm -f /usr/local/bin/domain-monitor-server /usr/local/bin/domain-monitor-agent
+
+    echo "[*] Удаляю $PROJECT_DIR ..."
+    cd /
+    rm -rf "${PROJECT_DIR:?}"
+
+    echo
+    echo "[OK] Domain Monitor полностью удалён с этой машины."
 }
 
 main() {
