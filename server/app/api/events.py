@@ -12,13 +12,14 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app import fleet_control
-from app.api.deps import get_db, get_notifier, require_node
+from app.api.deps import get_db, get_event_rate_limiter, get_notifier, require_node
 from app.api.schemas import EventBatchRequest, EventBatchResponse
 from app.database import Database
 from app.filters import classify_domain
 from app.metrics import EVENTS_TOTAL, NEW_DOMAINS_TOTAL, WATCHLIST_HITS_TOTAL
 from app.models import Node
 from app.notifier import Notifier
+from app.rate_limit import NodeRateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,21 @@ router = APIRouter(prefix="/api/v1/events", tags=["events"])
 async def ingest_events(
     request: Request, body: EventBatchRequest, node: Node = Depends(require_node), db: Database = Depends(get_db),
     notifier: Notifier = Depends(get_notifier),
+    rate_limiter: NodeRateLimiter = Depends(get_event_rate_limiter),
 ) -> EventBatchResponse:
+    allowed, retry_after = rate_limiter.check(node.id)
+    if not allowed:
+        # A request-level limit (not per-event) - a normal agent posting
+        # one batch per BATCH_INTERVAL_SECONDS never gets close to this,
+        # only a misbehaving/compromised agent hammering the endpoint
+        # does. 429 + Retry-After maps straight onto the agent's existing
+        # httpx error handling and exponential backoff - no agent-side
+        # change needed for this to just work.
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many requests from this node",
+            headers={"Retry-After": str(max(1, int(retry_after) + 1))},
+        )
+
     if not fleet_control.is_sending_enabled(db):
         # Belt-and-suspenders: an up-to-date agent already stops calling
         # this endpoint once "sending" is paused from Telegram, but an

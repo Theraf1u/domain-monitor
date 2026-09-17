@@ -10,6 +10,7 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand, FSInputFile, InputProfilePhotoStatic, MenuButtonCommands
 
+from app.backup_task import BackupTask
 from app.config import Config
 from app.database import Database
 from app.notifier import Notifier
@@ -51,12 +52,14 @@ async def configure_bot_profile(bot: Bot) -> None:
         await bot.set_my_profile_photo(photo=InputProfilePhotoStatic(photo=FSInputFile(_AVATAR_PATH)))
 
 
-def build_bot_and_dispatcher(config: Config, db: Database, notifier: Notifier) -> tuple[Bot, Dispatcher]:
+def build_bot_and_dispatcher(
+    config: Config, db: Database, notifier: Notifier, backup_task: BackupTask,
+) -> tuple[Bot, Dispatcher]:
     session = AiohttpSession(proxy=config.telegram_proxy) if config.telegram_proxy else None
     bot = Bot(token=config.bot_token, session=session)
     dp = Dispatcher(storage=MemoryStorage())
 
-    admin_only = AdminOnlyMiddleware(config.admin_id)
+    admin_only = AdminOnlyMiddleware(config.admin_ids)
     dp.message.middleware(admin_only)
     dp.callback_query.middleware(admin_only)
 
@@ -65,5 +68,6 @@ def build_bot_and_dispatcher(config: Config, db: Database, notifier: Notifier) -
     dp["db"] = db
     dp["config"] = config
     dp["notifier"] = notifier
+    dp["backup_task"] = backup_task
 
     return bot, dp

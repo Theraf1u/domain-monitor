@@ -382,7 +382,32 @@ reinstall_all() {
 # Pulls the latest code and rebuilds/restarts whichever components are
 # actually installed - skips a component entirely if it was never set up
 # (no .env), same "only touch what's there" rule as the rest of the menu.
+#
+# Anti-overlap: cron (auto-update) and a human mashing "Обновить" in the
+# menu both end up calling this - without a lock, an update that's still
+# rebuilding when the next cron tick fires would get a second `git reset
+# --hard` + build racing the first one (checkout corruption, two docker
+# builds fighting over the same image tag). flock on a fixed lock file
+# makes the second caller just skip instead of piling on.
+_UPDATE_LOCK_FILE="/tmp/domain-monitor-update.lock"
+
 update_all() {
+    if ! command -v flock >/dev/null 2>&1; then
+        _update_all_impl
+        return
+    fi
+    exec 9>"$_UPDATE_LOCK_FILE"
+    if ! flock -n 9; then
+        echo "[!] Обновление уже выполняется (другим процессом) - пропускаю, чтобы не запускать второе поверх." >&2
+        return 1
+    fi
+    _update_all_impl
+    local status=$?
+    flock -u 9
+    return "$status"
+}
+
+_update_all_impl() {
     echo
     echo "[*] Обновляю Domain Monitor ..."
     if [ ! -d "$PROJECT_DIR/.git" ]; then

@@ -28,9 +28,9 @@ _DEFAULT_BATCH_MODE = "instant"
 
 
 class Notifier:
-    def __init__(self, db: Database, admin_id: int) -> None:
+    def __init__(self, db: Database, admin_ids: list[int]) -> None:
         self.db = db
-        self.admin_id = admin_id
+        self.admin_ids = admin_ids
         self.bot: Bot | None = None
         self._pending: list[tuple[Node, str]] = []
         self._lock = asyncio.Lock()
@@ -38,6 +38,19 @@ class Notifier:
 
     def set_bot(self, bot: Bot) -> None:
         self.bot = bot
+
+    async def broadcast(self, text: str, parse_mode: str | None = "HTML") -> None:
+        """Sends to every configured admin, independently - one admin
+        having blocked the bot (or a stale/invalid id) never stops the
+        others from being notified."""
+        if self.bot is None:
+            return
+        for admin_id in self.admin_ids:
+            try:
+                await self.bot.send_message(admin_id, text, parse_mode=parse_mode)
+            except Exception:
+                TELEGRAM_ERRORS_TOTAL.inc()
+                logger.exception("Failed to deliver message to admin %s", admin_id)
 
     def is_globally_enabled(self) -> bool:
         return self.db.get_setting(SETTING_NOTIFICATIONS_ENABLED, "1") == "1"
@@ -70,11 +83,7 @@ class Notifier:
         if self.bot is None or not self.is_watchlist_enabled() or not node.notifications_enabled:
             return
         text = f"🚨 <b>WATCHLIST DOMAIN</b>\n\n<code>{domain}</code>\n\nНода: {node.name}"
-        try:
-            await self.bot.send_message(self.admin_id, text, parse_mode="HTML")
-        except Exception:
-            TELEGRAM_ERRORS_TOTAL.inc()
-            logger.exception("Failed to deliver watchlist notification to admin")
+        await self.broadcast(text)
 
     async def run(self) -> None:
         while not self._stopped.is_set():
@@ -109,8 +118,4 @@ class Notifier:
                 lines = "\n".join(f"• <code>{d}</code>" for d in domains[:30])
                 more = f"\n… и ещё {len(domains) - 30}" if len(domains) > 30 else ""
                 text = f"🌐 Обнаружено {len(domains)} новых доменов\n\nНода: {node_name}\n\n{lines}{more}"
-            try:
-                await self.bot.send_message(self.admin_id, text, parse_mode="HTML")
-            except Exception:
-                TELEGRAM_ERRORS_TOTAL.inc()
-                logger.exception("Failed to deliver notification to admin")
+            await self.broadcast(text)

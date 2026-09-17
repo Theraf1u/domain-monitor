@@ -15,11 +15,13 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app import runtime_settings
 from app.api import domains, events, nodes, stats
+from app.backup_task import BackupTask
 from app.config import load_config
 from app.database import Database
 from app.logging_config import setup_logging
 from app.metrics import DOMAINS_TOTAL, NODES_ONLINE, NODES_TOTAL
 from app.notifier import Notifier
+from app.rate_limit import NodeRateLimiter
 from app.retention import RetentionTask
 from app.telegram.bot import build_bot_and_dispatcher, configure_bot_profile
 
@@ -63,19 +65,25 @@ async def lifespan(app: FastAPI):
     db = Database(config.database_path)
     db.migrate()
 
-    notifier = Notifier(db, config.admin_id)
+    notifier = Notifier(db, config.admin_ids)
+    backup_task = BackupTask(db, config, notifier)
 
     app.state.config = config
     app.state.db = db
     app.state.notifier = notifier
+    app.state.backup_task = backup_task
+    app.state.event_rate_limiter = NodeRateLimiter(
+        config.events_rate_limit_capacity, config.events_rate_limit_per_second,
+    )
 
     stop_polling = asyncio.Event()
     background_tasks = [
         asyncio.create_task(RetentionTask(db, config).run()),
         asyncio.create_task(notifier.run()),
+        asyncio.create_task(backup_task.run()),
     ]
 
-    bot, dp = build_bot_and_dispatcher(config, db, notifier)
+    bot, dp = build_bot_and_dispatcher(config, db, notifier, backup_task)
     notifier.set_bot(bot)
     try:
         await configure_bot_profile(bot)
@@ -84,7 +92,7 @@ async def lifespan(app: FastAPI):
         # worth failing server startup over a transient Telegram API hiccup.
         logger.exception("Failed to configure bot profile - continuing anyway")
     background_tasks.append(asyncio.create_task(_run_polling_forever(dp, bot, stop_polling)))
-    logger.info("Telegram bot enabled (admin_id=%s)", config.admin_id)
+    logger.info("Telegram bot enabled (admin_ids=%s)", config.admin_ids)
 
     logger.info("Domain Monitor Server started on %s:%s", config.host, config.port)
     try:
@@ -92,6 +100,7 @@ async def lifespan(app: FastAPI):
     finally:
         logger.info("Shutting down")
         notifier.stop()
+        backup_task.stop()
         stop_polling.set()
         for task in background_tasks:
             task.cancel()

@@ -45,11 +45,12 @@ def main_menu(monitoring_enabled: bool = True, sending_enabled: bool = True) -> 
     b.button(text="🔔 Уведомления", callback_data="notify_menu")
     b.button(text="🔍 Фильтры", callback_data="filters")
     b.button(text="⚙️ Настройки", callback_data="settings")
+    b.button(text="💾 Бэкапы", callback_data="backups")
     mon_label = "⏸ Остановить мониторинг" if monitoring_enabled else "▶ Возобновить мониторинг"
     send_label = "⏸ Остановить отправку доменов" if sending_enabled else "▶ Возобновить отправку доменов"
     b.button(text=mon_label, callback_data="fleet_toggle_monitoring", style="danger" if monitoring_enabled else "success")
     b.button(text=send_label, callback_data="fleet_toggle_sending", style="danger" if sending_enabled else "success")
-    b.adjust(2, 2, 2, 1, 1)
+    b.adjust(2, 2, 2, 1, 1, 1)
     return b.as_markup()
 
 
@@ -276,4 +277,40 @@ def domain_notification(domain_id: int) -> InlineKeyboardMarkup:
     b.button(text="🚫 Игнорировать", callback_data=f"domain_ignore:{domain_id}", style="danger")
     b.button(text="📋 Копировать", callback_data=f"domain_copy:{domain_id}", style="primary")
     b.adjust(2)
+    return b.as_markup()
+
+
+# ------------------------------------------------------------------
+# Backups
+# ------------------------------------------------------------------
+
+BACKUP_DEST_LABELS = {
+    "server": "📦 Только на сервере",
+    "dm": "💬 В личку админам",
+    "group": "👥 В группу",
+}
+
+
+def backups_menu(enabled: bool, interval_hours: int, keep_count: int, destination: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    toggle = "⏸ Выключить автобэкап" if enabled else "▶ Включить автобэкап"
+    b.button(text=toggle, callback_data="backup_toggle", style="danger" if enabled else "success")
+    b.button(text=f"⏱ Периодичность: {interval_hours} ч.", callback_data="backup_set_interval", style="primary")
+    b.button(text=f"🗂 Хранить копий: {keep_count}", callback_data="backup_set_keep", style="primary")
+    dest_label = BACKUP_DEST_LABELS.get(destination, destination)
+    b.button(text=f"Способ доставки: {dest_label}", callback_data="backup_set_destination", style="primary")
+    b.button(text="▶️ Сделать бэкап сейчас", callback_data="backup_now", style="success")
+    b.button(text="📋 Список бэкапов", callback_data="backup_list")
+    b.button(text="⬅️ Назад", callback_data="main")
+    b.adjust(1, 1, 1, 1, 1, 1, 1)
+    return b.as_markup()
+
+
+def backup_destination_menu(current: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for value, label in BACKUP_DEST_LABELS.items():
+        prefix = "✅ " if value == current else ""
+        b.button(text=f"{prefix}{label}", callback_data=f"backup_dest:{value}")
+    b.button(text="⬅️ Назад", callback_data="backups")
+    b.adjust(1, 1, 1, 1)
     return b.as_markup()

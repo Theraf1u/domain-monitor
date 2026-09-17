@@ -63,9 +63,9 @@ run_wizard() {
         echo "Не похоже на токен бота (формат: <цифры>:<30+ символов>)."
     done
     while true; do
-        prompt admin_id "Твой Telegram ADMIN_ID (цифры, узнать у @userinfobot)" ""
-        [[ "$admin_id" =~ ^-?[0-9]+$ ]] && break
-        echo "Должно быть числом."
+        prompt admin_id "Telegram ADMIN_ID (цифры, узнать у @userinfobot; можно несколько через запятую)" ""
+        [[ "$admin_id" =~ ^-?[0-9]+(,-?[0-9]+)*$ ]] && break
+        echo "Должно быть числом (или числами через запятую)."
     done
     while true; do
         prompt telegram_proxy "Прокси для Telegram, если этот сервер без него не достучится (Enter - не нужен)" ""

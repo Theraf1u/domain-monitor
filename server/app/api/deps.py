@@ -16,6 +16,7 @@ from app.config import Config
 from app.database import Database
 from app.models import Node
 from app.notifier import Notifier
+from app.rate_limit import NodeRateLimiter
 from app.security import constant_time_eq, hash_token
 
 
@@ -29,6 +30,10 @@ def get_config(request: Request) -> Config:
 
 def get_notifier(request: Request) -> Notifier:
     return request.app.state.notifier
+
+
+def get_event_rate_limiter(request: Request) -> NodeRateLimiter:
+    return request.app.state.event_rate_limiter
 
 
 def require_admin(
