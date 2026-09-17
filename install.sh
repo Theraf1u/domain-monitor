@@ -162,7 +162,7 @@ print_menu_box() {
     box_line "3) Server       - сервер + Telegram-бот" "${C_NUM}3)${C_RESET} Server       - сервер + Telegram-бот"
     box_line "4) Статус       - что установлено и работает" "${C_NUM}4)${C_RESET} Статус       - что установлено и работает"
     box_line "5) Диагностика  - проверить установленные компоненты" "${C_NUM}5)${C_RESET} Диагностика  - проверить установленные компоненты"
-    box_line "6) Удалить всё  - снести всё, что тут стоит" "${C_NUM}6)${C_RESET} Удалить всё  - снести всё, что тут стоит"
+    box_line "6) Управление скриптом  - переустановка, обновление" "${C_NUM}6)${C_RESET} Управление скриптом  - переустановка, обновление"
     box_line "7) Выход" "${C_NUM}7)${C_RESET} Выход"
     box_bottom
 }
@@ -206,7 +206,7 @@ show_menu() {
         3) exec bash "$PROJECT_DIR/server/install.sh" ;;
         4) show_status; show_menu ;;
         5) run_doctor; show_menu ;;
-        6) uninstall_all ;;
+        6) script_management_menu; show_menu ;;
         7) exit 0 ;;
         *) echo "Неверный выбор."; sleep 1; show_menu ;;
     esac
@@ -306,21 +306,10 @@ install_both() {
     echo "     Статус: domain-monitor-server status / domain-monitor-agent status"
 }
 
-uninstall_all() {
-    echo
-    echo "Это удалит с этой машины ВСЁ, что относится к Domain Monitor:"
-    echo "  - контейнеры и образы domain-monitor-server / domain-monitor-agent"
-    echo "  - их данные (база нод/доменов на сервере, локальный буфер агента) и .env"
-    echo "  - CLI-команды (domain-monitor-server, domain-monitor-agent, dm)"
-    echo "  - всю папку проекта: $PROJECT_DIR"
-    echo
-    local confirm
-    read -r -p "Продолжить? (yes/no): " confirm </dev/tty
-    if [[ ! "$confirm" =~ ^[Yy] ]]; then
-        echo "Отменено."
-        return
-    fi
-
+# Actual teardown work, no prompts - shared by uninstall_all() and
+# reinstall_all() so there's exactly one place that knows how to fully
+# remove the thing, instead of two copies that can drift apart.
+_do_uninstall() {
     for component in server agent; do
         if [ -f "$PROJECT_DIR/$component/docker-compose.yml" ]; then
             echo "[*] Останавливаю $component ..."
@@ -340,17 +329,183 @@ uninstall_all() {
     docker rmi domain-monitor-server:latest domain-monitor-agent:latest >/dev/null 2>&1 || true
 
     rm -f /usr/local/bin/domain-monitor-server /usr/local/bin/domain-monitor-agent "$DM_COMMAND"
+    disable_auto_update_quiet
 
     echo "[*] Удаляю $PROJECT_DIR ..."
     cd /
     rm -rf "${PROJECT_DIR:?}"
+}
+
+uninstall_all() {
+    echo
+    echo "Это удалит с этой машины ВСЁ, что относится к Domain Monitor:"
+    echo "  - контейнеры и образы domain-monitor-server / domain-monitor-agent"
+    echo "  - их данные (база нод/доменов на сервере, локальный буфер агента) и .env"
+    echo "  - CLI-команды (domain-monitor-server, domain-monitor-agent, dm)"
+    echo "  - автообновление по расписанию, если было включено"
+    echo "  - всю папку проекта: $PROJECT_DIR"
+    echo
+    local confirm
+    read -r -p "Продолжить? (yes/no): " confirm </dev/tty
+    if [[ ! "$confirm" =~ ^[Yy] ]]; then
+        echo "Отменено."
+        return
+    fi
+
+    _do_uninstall
 
     echo
     echo "[OK] Domain Monitor полностью удалён с этой машины."
 }
 
+reinstall_all() {
+    echo
+    echo "Это полностью снесёт текущую установку (контейнеры, образы, данные,"
+    echo ".env, автообновление) и сразу откроет мастер установки заново, с нуля."
+    echo
+    local confirm
+    read -r -p "Продолжить? (yes/no): " confirm </dev/tty
+    if [[ ! "$confirm" =~ ^[Yy] ]]; then
+        echo "Отменено."
+        return
+    fi
+
+    _do_uninstall
+    echo
+    echo "[*] Ставлю заново ..."
+    resolve_project_dir
+    install_dm_command
+    show_menu
+}
+
+# Pulls the latest code and rebuilds/restarts whichever components are
+# actually installed - skips a component entirely if it was never set up
+# (no .env), same "only touch what's there" rule as the rest of the menu.
+update_all() {
+    echo
+    echo "[*] Обновляю Domain Monitor ..."
+    if [ ! -d "$PROJECT_DIR/.git" ]; then
+        echo "[!] $PROJECT_DIR - это не git-checkout, обновление кода невозможно." >&2
+        echo "    Переустанови через пункт «Управление скриптом -> Переустановить»." >&2
+        return 1
+    fi
+    if ! (cd "$PROJECT_DIR" && git fetch --quiet origin && git reset --quiet --hard origin/HEAD); then
+        echo "[ОШИБКА] Не удалось забрать обновления с git." >&2
+        return 1
+    fi
+    install_dm_command
+
+    local touched=0
+    if [ -f "$PROJECT_DIR/server/.env" ]; then
+        echo "[*] Пересобираю Server ..."
+        (cd "$PROJECT_DIR/server" && source scripts/lib.sh && compose_build_quiet) && touched=1
+    fi
+    if [ -f "$PROJECT_DIR/agent/.env" ]; then
+        echo "[*] Пересобираю Agent ..."
+        (cd "$PROJECT_DIR/agent" && source scripts/lib.sh && compose_build_quiet) && touched=1
+    fi
+    if [ "$touched" -eq 0 ]; then
+        echo "[*] Ничего не установлено - код обновлён, пересобирать нечего."
+    fi
+    echo
+    echo "[OK] Обновление завершено."
+}
+
+# ------------------------------------------------------------------
+# Auto-update: a root crontab entry that calls this same script with
+# --auto-update, which just runs update_all() non-interactively and
+# exits - no menu, no prompts, safe for cron. Entries are tagged with
+# CRON_MARKER so enabling/disabling never disturbs any of the admin's
+# own unrelated crontab lines.
+# ------------------------------------------------------------------
+CRON_MARKER="# domain-monitor-auto-update"
+
+is_auto_update_enabled() {
+    crontab -l 2>/dev/null | grep -qF "$CRON_MARKER"
+}
+
+disable_auto_update_quiet() {
+    crontab -l 2>/dev/null | grep -vF "$CRON_MARKER" | crontab - 2>/dev/null || true
+}
+
+enable_auto_update() {
+    if ! command -v crontab >/dev/null 2>&1; then
+        echo "[!] На этой машине нет cron/crontab - автообновление недоступно." >&2
+        return 1
+    fi
+    echo
+    echo "Как часто автоматически обновлять и пересобирать (git pull + rebuild)?"
+    echo "1) Ежедневно, в 03:00"
+    echo "2) Раз в неделю, воскресенье в 03:00"
+    echo "3) Свой график (в формате cron)"
+    local choice schedule
+    read -r -p "Выбор [1-3]: " choice </dev/tty
+    case "$choice" in
+        1) schedule="0 3 * * *" ;;
+        2) schedule="0 3 * * 0" ;;
+        3) read -r -p "Cron-выражение (например: 0 4 * * *): " schedule </dev/tty ;;
+        *) echo "Неверный выбор."; return 1 ;;
+    esac
+
+    disable_auto_update_quiet
+    (
+        crontab -l 2>/dev/null
+        echo "$schedule $DM_COMMAND --auto-update >> $PROJECT_DIR/auto-update.log 2>&1 $CRON_MARKER"
+    ) | crontab -
+    echo
+    echo "[OK] Автообновление включено: $schedule"
+    echo "     Лог: $PROJECT_DIR/auto-update.log"
+}
+
+disable_auto_update() {
+    disable_auto_update_quiet
+    echo
+    echo "[OK] Автообновление выключено."
+}
+
+toggle_auto_update() {
+    if is_auto_update_enabled; then
+        disable_auto_update
+    else
+        enable_auto_update
+    fi
+}
+
+script_management_menu() {
+    while true; do
+        echo
+        local au_status
+        if is_auto_update_enabled; then
+            au_status="включено"
+        else
+            au_status="выключено"
+        fi
+        echo "== Управление скриптом =="
+        echo "1) Переустановить    - полный снос и установка заново"
+        echo "2) Удалить           - снести всё, что тут стоит"
+        echo "3) Обновить          - git pull + пересборка установленных компонентов"
+        echo "4) Автообновление ($au_status)"
+        echo "5) Назад"
+        local choice
+        read -r -p "Выбор [1-5]: " choice </dev/tty
+        case "$choice" in
+            1) reinstall_all; return ;;
+            2) uninstall_all; exit 0 ;;
+            3) update_all ;;
+            4) toggle_auto_update ;;
+            5) return ;;
+            *) echo "Неверный выбор." ;;
+        esac
+    done
+}
+
 main() {
     check_root
+    if [ "${1:-}" = "--auto-update" ]; then
+        resolve_project_dir
+        update_all
+        exit 0
+    fi
     resolve_project_dir
     install_dm_command
     show_menu
