@@ -54,7 +54,7 @@ box_line() {
 
 check_root() {
     if [ "$(id -u)" -ne 0 ]; then
-        echo "This installer must be run as root (use sudo)." >&2
+        echo "Этот установщик нужно запускать от root (используй sudo)." >&2
         exit 1
     fi
 }
@@ -89,8 +89,16 @@ install_dm_command() {
     if [ -f "$DM_COMMAND" ] && cmp -s "$PROJECT_DIR/install.sh" "$DM_COMMAND" 2>/dev/null; then
         return
     fi
-    cp "$PROJECT_DIR/install.sh" "$DM_COMMAND"
-    chmod +x "$DM_COMMAND"
+    # Write to a temp file and rename into place rather than overwriting
+    # $DM_COMMAND directly - this process may itself be executing from
+    # that exact inode (re-running `dm` after a git pull), and an
+    # in-place cp/write would truncate the file bash is still reading
+    # from mid-script. A rename swaps the directory entry atomically and
+    # leaves the old inode's contents intact for any process still using it.
+    local tmp="${DM_COMMAND}.new.$$"
+    cp "$PROJECT_DIR/install.sh" "$tmp"
+    chmod +x "$tmp"
+    mv -f "$tmp" "$DM_COMMAND"
 }
 
 component_status() {
@@ -137,9 +145,38 @@ print_menu_box() {
     box_line "1) Agent        - только сниффер трафика" "${C_NUM}1)${C_RESET} Agent        - только сниффер трафика"
     box_line "2) Server       - сервер + Telegram-бот" "${C_NUM}2)${C_RESET} Server       - сервер + Telegram-бот"
     box_line "3) Оба          - сервер и агент на этой машине" "${C_NUM}3)${C_RESET} Оба          - сервер и агент на этой машине"
-    box_line "4) Удалить всё  - снести всё, что тут стоит" "${C_NUM}4)${C_RESET} Удалить всё  - снести всё, что тут стоит"
-    box_line "5) Выход" "${C_NUM}5)${C_RESET} Выход"
+    box_line "4) Статус       - что установлено и работает" "${C_NUM}4)${C_RESET} Статус       - что установлено и работает"
+    box_line "5) Диагностика  - проверить установленные компоненты" "${C_NUM}5)${C_RESET} Диагностика  - проверить установленные компоненты"
+    box_line "6) Удалить всё  - снести всё, что тут стоит" "${C_NUM}6)${C_RESET} Удалить всё  - снести всё, что тут стоит"
+    box_line "7) Выход" "${C_NUM}7)${C_RESET} Выход"
     box_bottom
+}
+
+show_status() {
+    echo
+    printf "${C_LABEL}Server:${C_RESET} %b\n" "$(component_status server)"
+    printf "${C_LABEL}Agent:${C_RESET}  %b\n" "$(component_status agent)"
+    echo
+    read -r -p "Enter - назад в меню" _ </dev/tty
+}
+
+run_doctor() {
+    echo
+    if [ -f "$PROJECT_DIR/server/.env" ]; then
+        echo "== Server =="
+        bash "$PROJECT_DIR/server/scripts/doctor.sh"
+        echo
+    fi
+    if [ -f "$PROJECT_DIR/agent/.env" ]; then
+        echo "== Agent =="
+        bash "$PROJECT_DIR/agent/scripts/doctor.sh"
+        echo
+    fi
+    if [ ! -f "$PROJECT_DIR/server/.env" ] && [ ! -f "$PROJECT_DIR/agent/.env" ]; then
+        echo "Ничего не установлено - нечего проверять."
+        echo
+    fi
+    read -r -p "Enter - назад в меню" _ </dev/tty
 }
 
 show_menu() {
@@ -147,13 +184,15 @@ show_menu() {
     print_menu_box
     echo
     local choice
-    read -r -p "$(printf "${C_LABEL}Выбери действие${C_RESET} ${C_OFF}[1-5]${C_RESET}: ")" choice </dev/tty
+    read -r -p "$(printf "${C_LABEL}Выбери действие${C_RESET} ${C_OFF}[1-7]${C_RESET}: ")" choice </dev/tty
     case "$choice" in
         1) exec bash "$PROJECT_DIR/agent/install-agent.sh" ;;
         2) exec bash "$PROJECT_DIR/server/install.sh" ;;
         3) install_both ;;
-        4) uninstall_all ;;
-        5) exit 0 ;;
+        4) show_status; show_menu ;;
+        5) run_doctor; show_menu ;;
+        6) uninstall_all ;;
+        7) exit 0 ;;
         *) echo "Неверный выбор."; sleep 1; show_menu ;;
     esac
 }
@@ -215,10 +254,9 @@ install_both() {
     echo
     echo "[*] Настраиваю Agent на этой же машине (SERVER_URL=http://127.0.0.1:${port})"
     local node_name interface
-    read -r -p "Имя для этой ноды [$(hostname)]: " node_name </dev/tty
-    node_name="${node_name:-$(hostname)}"
-    read -r -p "Сетевой интерфейс для захвата трафика [any]: " interface </dev/tty
-    interface="${interface:-any}"
+    node_name="$(hostname)"
+    interface="any"
+    echo "Имя ноды: $node_name, интерфейс: $interface (поменять можно потом в agent/.env)"
 
     echo "[*] Создаю ноду на сервере ..."
     local resp token
@@ -239,9 +277,8 @@ install_both() {
     sed -i "s|^INTERFACE=.*|INTERFACE=${interface}|" "$agent_env"
     chmod 600 "$agent_env"
 
-    echo "[*] Собираю и запускаю Agent ..."
-    if ! (cd "$PROJECT_DIR/agent" && source scripts/lib.sh && compose up -d --build); then
-        echo "[FAILED] Сборка/запуск агента не завершились - см. ошибку выше." >&2
+    if ! (cd "$PROJECT_DIR/agent" && source scripts/lib.sh && compose_build_quiet); then
+        echo "[ОШИБКА] Сборка/запуск агента не завершились - см. ошибку выше." >&2
         exit 1
     fi
 

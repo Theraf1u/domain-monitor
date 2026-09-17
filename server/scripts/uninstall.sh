@@ -7,15 +7,15 @@ CLI_TARGET="/usr/local/bin/domain-monitor-server"
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 if [ "$(id -u)" -ne 0 ]; then
-    echo "This script must be run as root (use sudo)." >&2
+    echo "Этот скрипт нужно запускать от root (используй sudo)." >&2
     exit 1
 fi
 
-echo "This will stop and remove the Domain Monitor Server container and Docker image."
-echo "All connected agents will be unable to report events until you reinstall."
-read -r -p "Continue? (yes/no): " confirm </dev/tty
+echo "Это остановит и удалит контейнер и Docker-образ Domain Monitor Server."
+echo "Все подключённые агенты не смогут отправлять события, пока сервер не переустановлен."
+read -r -p "Продолжить? (yes/no): " confirm </dev/tty
 if [[ ! "$confirm" =~ ^[Yy] ]]; then
-    echo "Cancelled."
+    echo "Отменено."
     exit 0
 fi
 
@@ -23,28 +23,28 @@ fi
 
 if [ -f "$CLI_TARGET" ]; then
     rm -f "$CLI_TARGET"
-    echo "Removed $CLI_TARGET"
+    echo "Удалено: $CLI_TARGET"
 fi
 
-read -r -p "Also delete the database (all nodes/domains/events/users) in ./data? (yes/no): " wipe_data </dev/tty
+read -r -p "Удалить также базу данных (все ноды/домены/события/пользователи) в ./data? (yes/no): " wipe_data </dev/tty
 if [[ "$wipe_data" =~ ^[Yy] ]]; then
     rm -rf "${PROJECT_DIR:?}/data"
-    echo "Data removed."
+    echo "Данные удалены."
 fi
 
 if [ -d "$PROJECT_DIR/backups" ]; then
-    read -r -p "Also delete backups in ./backups? (yes/no): " wipe_backups </dev/tty
+    read -r -p "Удалить также бэкапы в ./backups? (yes/no): " wipe_backups </dev/tty
     if [[ "$wipe_backups" =~ ^[Yy] ]]; then
         rm -rf "${PROJECT_DIR:?}/backups"
-        echo "Backups removed."
+        echo "Бэкапы удалены."
     fi
 fi
 
-read -r -p "Also delete the whole project directory ($PROJECT_DIR)? (yes/no): " wipe_all </dev/tty
+read -r -p "Удалить также всю папку проекта ($PROJECT_DIR)? (yes/no): " wipe_all </dev/tty
 if [[ "$wipe_all" =~ ^[Yy] ]]; then
     cd /
     rm -rf "${PROJECT_DIR:?}"
-    echo "Project directory removed. Uninstall complete."
+    echo "Папка проекта удалена. Удаление завершено."
 else
-    echo "Uninstall complete. Project files remain at $PROJECT_DIR (delete manually if no longer needed)."
+    echo "Удаление завершено. Файлы проекта остались в $PROJECT_DIR (удали вручную, если больше не нужны)."
 fi

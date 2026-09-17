@@ -17,7 +17,7 @@ source "$SCRIPTS_DIR/lib.sh"
 
 check_root() {
     if [ "$(id -u)" -ne 0 ]; then
-        echo "This installer must be run as root (use sudo)." >&2
+        echo "Этот установщик нужно запускать от root (используй sudo)." >&2
         exit 1
     fi
 }
@@ -26,7 +26,7 @@ install_docker_if_missing() {
     if command -v docker >/dev/null 2>&1; then
         return
     fi
-    echo "[*] Docker not found, installing via get.docker.com ..."
+    echo "[*] Docker не найден, устанавливаю через get.docker.com ..."
     curl -fsSL https://get.docker.com | sh
 }
 
@@ -44,42 +44,44 @@ prompt() {
 
 run_wizard() {
     echo
-    echo "== Domain Monitor Agent - setup =="
+    echo "== Установка Agent =="
     echo
 
-    local server_url node_token node_name interface
+    local server_url node_token
 
     while true; do
-        prompt server_url "Server URL (e.g. https://monitor.example.com)" ""
+        prompt server_url "Server URL (например https://monitor.example.com)" ""
         [[ "$server_url" =~ ^https?:// ]] && break
-        echo "Must start with http:// or https://"
+        echo "Должен начинаться с http:// или https://"
     done
 
     while true; do
-        prompt node_token "Node Token (from the Server's Add Node)" ""
+        prompt node_token "Node Token (получен на сервере: Ноды -> Добавить)" ""
         [[ "$node_token" == nmt_* ]] && break
-        echo "Doesn't look like a node token (expected to start with 'nmt_')"
+        echo "Не похоже на токен ноды (должен начинаться с nmt_)."
     done
-
-    prompt node_name "Node Name (local label, cosmetic only)" "$(hostname)"
-    prompt interface "Network interface to capture on" "any"
 
     cp "$PROJECT_DIR/.env.example" "$ENV_FILE"
     sed -i "s|^SERVER_URL=.*|SERVER_URL=${server_url}|" "$ENV_FILE"
     sed -i "s|^NODE_TOKEN=.*|NODE_TOKEN=${node_token}|" "$ENV_FILE"
-    sed -i "s|^NODE_NAME=.*|NODE_NAME=${node_name}|" "$ENV_FILE"
-    sed -i "s|^INTERFACE=.*|INTERFACE=${interface}|" "$ENV_FILE"
+    sed -i "s|^NODE_NAME=.*|NODE_NAME=$(hostname)|" "$ENV_FILE"
+    sed -i "s|^INTERFACE=.*|INTERFACE=any|" "$ENV_FILE"
     chmod 600 "$ENV_FILE"
 
+    echo "Имя ноды: $(hostname), интерфейс: any (поменять можно потом в .env)"
     echo
-    echo "[*] Building and starting the agent ..."
-    (cd "$PROJECT_DIR" && compose up -d --build)
+    if ! (cd "$PROJECT_DIR" && compose_build_quiet); then
+        echo
+        echo "[ОШИБКА] Сборка/запуск не завершились - см. ошибку выше." >&2
+        echo "         Исправь и повтори: cd $PROJECT_DIR && sudo bash install-agent.sh" >&2
+        exit 1
+    fi
 
     install_cli_wrapper
     echo
-    echo "[OK] Agent installed and running."
-    echo "     Check status:  domain-monitor-agent status"
-    echo "     Follow logs:   domain-monitor-agent logs"
+    echo "[OK] Agent установлен и запущен."
+    echo "     Статус: domain-monitor-agent status"
+    echo "     Логи:   domain-monitor-agent logs"
 }
 
 install_cli_wrapper() {

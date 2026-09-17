@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Domain Monitor Server CLI.
 #
-#   domain-monitor-server            interactive management menu
-#   domain-monitor-server status     container + health status
-#   domain-monitor-server start      start the service
-#   domain-monitor-server stop       stop the service
-#   domain-monitor-server restart    restart the service
-#   domain-monitor-server logs       follow logs
-#   domain-monitor-server update     pull latest code, rebuild, restart
-#   domain-monitor-server uninstall  remove container/image/data (with confirmation)
-#   domain-monitor-server doctor     run diagnostics
-#   domain-monitor-server backup     back up database + config to ./backups
-#   domain-monitor-server restore <f> restore from a backup file
+#   domain-monitor-server            интерактивное меню управления
+#   domain-monitor-server status     статус контейнера + healthcheck
+#   domain-monitor-server start      запустить сервис
+#   domain-monitor-server stop       остановить сервис
+#   domain-monitor-server restart    перезапустить сервис
+#   domain-monitor-server logs       смотреть логи
+#   domain-monitor-server update     забрать код, пересобрать, перезапустить
+#   domain-monitor-server uninstall  удалить контейнер/образ/данные (с подтверждением)
+#   domain-monitor-server doctor     запустить диагностику
+#   domain-monitor-server backup     сделать бэкап БД + конфига в ./backups
+#   domain-monitor-server restore <f> восстановить из файла бэкапа
 set -uo pipefail
 
 # Resolve through the /usr/local/bin symlink the installer creates - a
@@ -39,8 +39,8 @@ case "$cmd" in
     restore)   bash "$SCRIPTS_DIR/restore.sh" "${2:-}" ;;
     -h|--help|help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' ;;
     *)
-        echo "Unknown command: $cmd" >&2
-        echo "Run 'domain-monitor-server help' for usage." >&2
+        echo "Неизвестная команда: $cmd" >&2
+        echo "Запусти 'domain-monitor-server help' для справки." >&2
         exit 1
         ;;
 esac

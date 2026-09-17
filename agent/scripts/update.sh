@@ -6,24 +6,24 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 if [ "$(id -u)" -ne 0 ]; then
-    echo "This script must be run as root (use sudo)." >&2
+    echo "Этот скрипт нужно запускать от root (используй sudo)." >&2
     exit 1
 fi
 
 cd "$PROJECT_DIR"
 
-if [ -d .git ]; then
-    echo "[*] Pulling latest changes..."
-    git fetch --quiet origin
-    git reset --quiet --hard origin/HEAD
+if [ -d .git ] || [ -d ../.git ]; then
+    echo "[*] Забираю последние изменения..."
+    git -C "$(git rev-parse --show-toplevel 2>/dev/null || echo .)" fetch --quiet origin
+    git -C "$(git rev-parse --show-toplevel 2>/dev/null || echo .)" reset --quiet --hard origin/HEAD
 else
-    echo "[!] Not a git checkout - rebuilding local files as-is."
+    echo "[!] Это не git-репозиторий - пересобираю локальные файлы как есть."
 fi
 
-echo "[*] Rebuilding image..."
+echo "[*] Пересобираю образ..."
 compose build
 
-echo "[*] Restarting..."
+echo "[*] Перезапускаю..."
 compose up -d
 
-echo "[OK] Update complete."
+echo "[OK] Обновление завершено."

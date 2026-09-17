@@ -14,54 +14,54 @@ fail() { echo "✗ $1"; [ -n "${2:-}" ] && echo "  -> $2"; FAILED=1; }
 
 # Docker
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-    ok "Docker is installed and running"
+    ok "Docker установлен и запущен"
 else
-    fail "Docker is not available/running" "Install Docker or start the Docker daemon."
+    fail "Docker недоступен/не запущен" "Установи Docker или запусти демон Docker."
 fi
 
 # Compose
 if [ "$(have_compose)" != "none" ]; then
-    ok "Docker Compose is available"
+    ok "Docker Compose доступен"
 else
-    fail "Docker Compose not found" "Install the 'docker compose' plugin or 'docker-compose'."
+    fail "Docker Compose не найден" "Установи плагин 'docker compose' или 'docker-compose'."
 fi
 
 # .env
 if [ -f "$ENV_FILE" ]; then
-    ok ".env exists"
+    ok ".env существует"
     if grep -q '^ADMIN_API_KEY=.\+' "$ENV_FILE"; then
-        ok "ADMIN_API_KEY is set"
+        ok "ADMIN_API_KEY задан"
     else
-        fail "ADMIN_API_KEY is missing/empty in .env" "Run the installer again or set it manually."
+        fail "ADMIN_API_KEY пуст/отсутствует в .env" "Запусти установщик заново или задай вручную."
     fi
 else
-    fail ".env not found at $ENV_FILE" "Run install.sh to create it."
+    fail ".env не найден по пути $ENV_FILE" "Запусти install.sh, чтобы его создать."
 fi
 
 # Container
 if docker inspect domain-monitor-server >/dev/null 2>&1; then
     running="$(docker inspect --format '{{.State.Running}}' domain-monitor-server)"
     if [ "$running" = "true" ]; then
-        ok "Container is running"
+        ok "Контейнер запущен"
         health="$(docker inspect --format '{{.State.Health.Status}}' domain-monitor-server 2>/dev/null || echo none)"
         if [ "$health" = "healthy" ] || [ "$health" = "none" ]; then
-            ok "Container healthcheck: $health"
+            ok "Healthcheck контейнера: $health"
         else
-            fail "Container healthcheck: $health" "Check logs: domain-monitor-server logs"
+            fail "Healthcheck контейнера: $health" "Смотри логи: domain-monitor-server logs"
         fi
     else
-        fail "Container exists but is not running" "domain-monitor-server start"
+        fail "Контейнер существует, но не запущен" "domain-monitor-server start"
     fi
 else
-    fail "Container 'domain-monitor-server' does not exist" "Run install.sh."
+    fail "Контейнер 'domain-monitor-server' не существует" "Запусти install.sh."
 fi
 
 # HTTP reachability
 PORT="$(grep -oP '^PORT=\K.*' "$ENV_FILE" 2>/dev/null || echo 8000)"
 if curl -fsS -m 5 "http://localhost:${PORT}/healthz" >/dev/null 2>&1; then
-    ok "HTTP /healthz responds on port $PORT"
+    ok "HTTP /healthz отвечает на порту $PORT"
 else
-    fail "HTTP /healthz did not respond on port $PORT" "Container may still be starting, or the port is blocked."
+    fail "HTTP /healthz не отвечает на порту $PORT" "Контейнер может ещё стартовать, либо порт заблокирован."
 fi
 
 # Database
@@ -69,17 +69,17 @@ DB_FILE="$PROJECT_DIR/data/domain_monitor.db"
 if [ -f "$DB_FILE" ]; then
     if command -v sqlite3 >/dev/null 2>&1; then
         if sqlite3 "$DB_FILE" "PRAGMA integrity_check;" 2>/dev/null | grep -q "^ok$"; then
-            ok "Database integrity check passed"
+            ok "Проверка целостности БД пройдена"
         else
-            fail "Database integrity check failed" "Consider restoring from a backup: domain-monitor-server restore"
+            fail "Проверка целостности БД провалена" "Рассмотри восстановление из бэкапа: domain-monitor-server restore"
         fi
         applied="$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM schema_migrations;" 2>/dev/null || echo 0)"
-        ok "Migrations applied: $applied"
+        ok "Применено миграций: $applied"
     else
-        ok "Database file exists (sqlite3 CLI not installed on host, skipped integrity check)"
+        ok "Файл БД существует (sqlite3 CLI не установлен на хосте, проверка целостности пропущена)"
     fi
 else
-    fail "Database file not found at $DB_FILE" "It's created on first start; check container logs if it's missing after a while."
+    fail "Файл БД не найден по пути $DB_FILE" "Создаётся при первом запуске; если долго отсутствует - смотри логи контейнера."
 fi
 
 # Telegram - the only management interface, so this is a hard requirement.
@@ -89,28 +89,28 @@ if grep -q '^BOT_TOKEN=.\+' "$ENV_FILE" 2>/dev/null; then
     CURL_PROXY_ARG=()
     [ -n "$PROXY" ] && CURL_PROXY_ARG=(-x "$PROXY")
     if curl -fsS -m 8 "${CURL_PROXY_ARG[@]}" "https://api.telegram.org/bot${BOT_TOKEN}/getMe" | grep -q '"ok":true'; then
-        ok "Telegram API reachable, bot token valid"
+        ok "Telegram API доступен, токен бота верный"
     else
-        fail "Telegram API not reachable or token invalid" \
-            "Check BOT_TOKEN, and TELEGRAM_PROXY if Telegram is blocked on this network. Also verify the container itself can reach it: docker logs domain-monitor-server"
+        fail "Telegram API недоступен или токен неверный" \
+            "Проверь BOT_TOKEN, и TELEGRAM_PROXY если Telegram заблокирован на этой сети. Также проверь доступ изнутри контейнера: docker logs domain-monitor-server"
     fi
 else
-    fail "BOT_TOKEN not set in .env" "Telegram is the only management interface - run install.sh again or set BOT_TOKEN/ADMIN_ID by hand."
+    fail "BOT_TOKEN не задан в .env" "Telegram - единственный способ управления. Запусти install.sh заново или задай BOT_TOKEN/ADMIN_ID вручную."
 fi
 
 # Disk space
 AVAIL_KB="$(df -Pk "$PROJECT_DIR" | awk 'NR==2 {print $4}')"
 AVAIL_MB=$((AVAIL_KB / 1024))
 if [ "$AVAIL_MB" -ge 500 ]; then
-    ok "Disk space: ${AVAIL_MB}MB free"
+    ok "Место на диске: ${AVAIL_MB}МБ свободно"
 else
-    fail "Low disk space: ${AVAIL_MB}MB free" "Free up space or move ./data to a larger volume."
+    fail "Мало места на диске: ${AVAIL_MB}МБ свободно" "Освободи место или перенеси ./data на диск побольше."
 fi
 
 echo
 if [ "$FAILED" -eq 0 ]; then
-    echo "All checks passed."
+    echo "Все проверки пройдены."
 else
-    echo "Some checks failed - see recommendations above."
+    echo "Некоторые проверки провалены - см. рекомендации выше."
 fi
 exit "$FAILED"

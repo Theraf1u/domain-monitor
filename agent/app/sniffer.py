@@ -16,12 +16,30 @@ from app.filters import normalize_domain
 
 logger = logging.getLogger(__name__)
 
+# A live tshark process accumulates per-TCP-stream bookkeeping (endpoint/
+# conversation tracking) for as long as it runs, and on a node with a
+# high rate of new connections (hundreds of concurrent users) that state
+# grows steadily even with reassembly/sequence-analysis disabled above -
+# there's no live-capture equivalent of the "free everything at EOF" that
+# happens when tshark finishes reading a finite pcap file. Restarting the
+# process periodically resets that state before it can become a problem,
+# independent of whatever the exact accumulating structure turns out to
+# be. Losing ~1-2s of capture during the swap is a fine trade for a
+# process that can no longer grow without bound.
+_MAX_SESSION_SECONDS = 600
+
 
 @dataclass(frozen=True)
 class _SourceSpec:
     name: str
     tshark_filter: str
     tshark_field: str
+    capture_filter: str  # BPF, applied by the kernel before tshark ever
+                          # sees the packet - the actual performance lever.
+                          # tshark_filter above is a *display* filter, applied
+                          # in userspace after full protocol dissection, so it
+                          # alone does nothing to cut CPU spent dissecting
+                          # traffic that could never match anyway.
 
 
 # Only sources with a real, working implementation are listed here - per
@@ -29,8 +47,14 @@ class _SourceSpec:
 # yet is documented as a roadmap item, not offered as a toggle that
 # silently does nothing.
 _AVAILABLE_SOURCES: dict[str, _SourceSpec] = {
-    "tls_sni": _SourceSpec("tls_sni", "tls.handshake.extensions_server_name", "tls.handshake.extensions_server_name"),
-    "dns": _SourceSpec("dns", "dns.flags.response == 0 && dns.qry.name", "dns.qry.name"),
+    "tls_sni": _SourceSpec(
+        "tls_sni", "tls.handshake.extensions_server_name", "tls.handshake.extensions_server_name",
+        capture_filter="tcp",
+    ),
+    "dns": _SourceSpec(
+        "dns", "dns.flags.response == 0 && dns.qry.name", "dns.qry.name",
+        capture_filter="udp port 53",
+    ),
 }
 
 
@@ -62,16 +86,24 @@ class _SourceWorker:
     async def run(self) -> None:
         while not self._stopped.is_set():
             try:
-                await self._run_once()
+                await asyncio.wait_for(self._run_once(), timeout=_MAX_SESSION_SECONDS)
+            except asyncio.TimeoutError:
+                logger.info(
+                    "Sniffer source %s: periodic restart after %ss (bounds long-capture state growth)",
+                    self.spec.name, _MAX_SESSION_SECONDS,
+                )
+                await self._terminate_process()
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception("Sniffer source %s crashed, restarting in 5s", self.spec.name)
-            if not self._stopped.is_set():
                 await asyncio.sleep(5)
 
     async def stop(self) -> None:
         self._stopped.set()
+        await self._terminate_process()
+
+    async def _terminate_process(self) -> None:
         if self._process and self._process.returncode is None:
             self._process.terminate()
             try:
@@ -83,6 +115,29 @@ class _SourceWorker:
         cmd = [
             self.tshark_path,
             "-i", self.interface,
+            "-f", self.spec.capture_filter,  # kernel-level BPF filter - the
+                                              # actual CPU saver, see _SourceSpec
+            "-n",  # disable all name resolution (MAC/network/transport) -
+                    # this alone is a well-known tshark CPU sink under load
+            "-Q",  # quiet: skip the periodic packet-count status output
+            # TCP stream reassembly keeps per-connection state alive for the
+            # life of the capture process. On a node with hundreds of
+            # concurrently churning connections, that state grows without
+            # bound over a long-running live capture (unlike analyzing a
+            # finite pcap file, where it gets freed at EOF) - this is what
+            # actually balloons RAM/CPU over time, not raw packet volume.
+            # We don't need reassembly anyway: a TLS ClientHello carrying
+            # SNI is essentially always a single packet.
+            "-o", "tcp.desegment_tcp_streams:false",
+            "-o", "tls.desegment_ssl_records:false",
+            # TCP sequence-number analysis (retransmission/RTT/out-of-order
+            # detection) is on by default and keeps *its own* per-stream
+            # state table alive for the life of the process, same issue as
+            # reassembly above and, on a churn-heavy node, the bigger of
+            # the two. We only read one field off a ClientHello - none of
+            # this analysis is used for anything here.
+            "-o", "tcp.analyze_sequence_numbers:false",
+            "-o", "tcp.calculate_timestamps:false",
             "-Y", self.spec.tshark_filter,
             "-T", "fields",
             "-e", self.spec.tshark_field,

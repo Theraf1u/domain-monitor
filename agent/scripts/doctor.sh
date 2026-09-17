@@ -11,57 +11,57 @@ ok()   { echo "✓ $1"; }
 fail() { echo "✗ $1"; [ -n "${2:-}" ] && echo "  -> $2"; FAILED=1; }
 
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-    ok "Docker is installed and running"
+    ok "Docker установлен и запущен"
 else
-    fail "Docker is not available/running" "Install Docker or start the Docker daemon."
+    fail "Docker недоступен/не запущен" "Установи Docker или запусти демон Docker."
 fi
 
 if [ "$(have_compose)" != "none" ]; then
-    ok "Docker Compose is available"
+    ok "Docker Compose доступен"
 else
-    fail "Docker Compose not found" "Install the 'docker compose' plugin or 'docker-compose'."
+    fail "Docker Compose не найден" "Установи плагин 'docker compose' или 'docker-compose'."
 fi
 
 if [ -f "$ENV_FILE" ]; then
-    ok ".env exists"
-    grep -q '^SERVER_URL=https\?://.\+' "$ENV_FILE" && ok "SERVER_URL is set" || fail "SERVER_URL missing/invalid in .env" "Run install-agent.sh again."
-    grep -q '^NODE_TOKEN=nmt_.\+' "$ENV_FILE" && ok "NODE_TOKEN is set" || fail "NODE_TOKEN missing/invalid in .env" "Get a token from the Server (Add Node) and set it in .env."
+    ok ".env существует"
+    grep -q '^SERVER_URL=https\?://.\+' "$ENV_FILE" && ok "SERVER_URL задан" || fail "SERVER_URL пуст/отсутствует в .env" "Запусти install-agent.sh заново."
+    grep -q '^NODE_TOKEN=nmt_.\+' "$ENV_FILE" && ok "NODE_TOKEN задан" || fail "NODE_TOKEN пуст/отсутствует в .env" "Получи токен на сервере (Ноды -> Добавить) и пропиши в .env."
 else
-    fail ".env not found at $ENV_FILE" "Run install-agent.sh to create it."
+    fail ".env не найден по пути $ENV_FILE" "Запусти install-agent.sh, чтобы его создать."
 fi
 
 if docker inspect domain-monitor-agent >/dev/null 2>&1; then
     running="$(docker inspect --format '{{.State.Running}}' domain-monitor-agent)"
     if [ "$running" = "true" ]; then
-        ok "Container is running"
+        ok "Контейнер запущен"
         health="$(docker inspect --format '{{.State.Health.Status}}' domain-monitor-agent 2>/dev/null || echo none)"
-        [ "$health" = "healthy" ] || [ "$health" = "none" ] && ok "Container healthcheck: $health" || fail "Container healthcheck: $health" "Check logs: domain-monitor-agent logs"
+        [ "$health" = "healthy" ] || [ "$health" = "none" ] && ok "Healthcheck контейнера: $health" || fail "Healthcheck контейнера: $health" "Смотри логи: domain-monitor-agent logs"
 
         if docker exec domain-monitor-agent tshark -v >/dev/null 2>&1; then
-            ok "tshark is present inside the container"
+            ok "tshark доступен внутри контейнера"
         else
-            fail "tshark not found/working inside the container" "Image may be out of date; try: domain-monitor-agent update"
+            fail "tshark не найден/не работает внутри контейнера" "Образ может быть устаревшим, попробуй: domain-monitor-agent update"
         fi
 
         caps="$(docker inspect --format '{{.HostConfig.CapAdd}}' domain-monitor-agent 2>/dev/null)"
         if echo "$caps" | grep -q NET_ADMIN && echo "$caps" | grep -q NET_RAW; then
-            ok "Capture capabilities (NET_ADMIN, NET_RAW) are set"
+            ok "Права на захват трафика (NET_ADMIN, NET_RAW) заданы"
         else
-            fail "Missing NET_ADMIN/NET_RAW capabilities" "Recreate the container via docker-compose.yml (do not run with 'docker run' manually)."
+            fail "Отсутствуют права NET_ADMIN/NET_RAW" "Пересоздай контейнер через docker-compose.yml (не запускай вручную через 'docker run')."
         fi
     else
-        fail "Container exists but is not running" "domain-monitor-agent start"
+        fail "Контейнер существует, но не запущен" "domain-monitor-agent start"
     fi
 else
-    fail "Container 'domain-monitor-agent' does not exist" "Run install-agent.sh."
+    fail "Контейнер 'domain-monitor-agent' не существует" "Запусти install-agent.sh."
 fi
 
 if [ -f "$ENV_FILE" ] && grep -q '^SERVER_URL=' "$ENV_FILE"; then
     SERVER_URL="$(grep -oP '^SERVER_URL=\K.*' "$ENV_FILE")"
     if curl -fsS -m 5 "${SERVER_URL}/healthz" >/dev/null 2>&1; then
-        ok "Server reachable at $SERVER_URL"
+        ok "Сервер доступен по адресу $SERVER_URL"
     else
-        fail "Server not reachable at $SERVER_URL" "Check network/firewall between this node and the server."
+        fail "Сервер недоступен по адресу $SERVER_URL" "Проверь сеть/файрвол между этой нодой и сервером."
     fi
 fi
 
@@ -69,29 +69,29 @@ DB_FILE="$PROJECT_DIR/data/agent_buffer.db"
 if [ -f "$DB_FILE" ]; then
     if command -v sqlite3 >/dev/null 2>&1; then
         if sqlite3 "$DB_FILE" "PRAGMA integrity_check;" 2>/dev/null | grep -q "^ok$"; then
-            ok "Local buffer database integrity check passed"
+            ok "Проверка целостности локального буфера пройдена"
         else
-            fail "Local buffer database integrity check failed" "Safe to delete ./data/agent_buffer.db - it's just a retry buffer, not the source of truth."
+            fail "Проверка целостности локального буфера провалена" "./data/agent_buffer.db можно удалить - это просто буфер повторной отправки, а не источник истины."
         fi
     else
-        ok "Local buffer database file exists (sqlite3 CLI not installed on host, skipped integrity check)"
+        ok "Файл локального буфера существует (sqlite3 CLI не установлен на хосте, проверка целостности пропущена)"
     fi
 else
-    ok "Local buffer database not created yet (agent may have just started)"
+    ok "Локальный буфер ещё не создан (агент мог только что запуститься)"
 fi
 
 AVAIL_KB="$(df -Pk "$PROJECT_DIR" | awk 'NR==2 {print $4}')"
 AVAIL_MB=$((AVAIL_KB / 1024))
 if [ "$AVAIL_MB" -ge 200 ]; then
-    ok "Disk space: ${AVAIL_MB}MB free"
+    ok "Место на диске: ${AVAIL_MB}МБ свободно"
 else
-    fail "Low disk space: ${AVAIL_MB}MB free" "Free up space - a full disk can stall the local event buffer."
+    fail "Мало места на диске: ${AVAIL_MB}МБ свободно" "Освободи место - переполненный диск может застопорить локальный буфер событий."
 fi
 
 echo
 if [ "$FAILED" -eq 0 ]; then
-    echo "All checks passed."
+    echo "Все проверки пройдены."
 else
-    echo "Some checks failed - see recommendations above."
+    echo "Некоторые проверки провалены - см. рекомендации выше."
 fi
 exit "$FAILED"

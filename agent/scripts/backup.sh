@@ -17,4 +17,4 @@ tar_args=(-czf "$OUT")
 [ -f .env ] && tar_args+=(.env)
 
 tar "${tar_args[@]}"
-echo "[OK] Backup written to $OUT ($(du -h "$OUT" | cut -f1))"
+echo "[OK] Бэкап записан в $OUT ($(du -h "$OUT" | cut -f1))"

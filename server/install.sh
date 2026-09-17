@@ -17,7 +17,7 @@ source "$SCRIPTS_DIR/lib.sh"
 
 check_root() {
     if [ "$(id -u)" -ne 0 ]; then
-        echo "This installer must be run as root (use sudo)." >&2
+        echo "Этот установщик нужно запускать от root (используй sudo)." >&2
         exit 1
     fi
 }
@@ -26,7 +26,7 @@ install_docker_if_missing() {
     if command -v docker >/dev/null 2>&1; then
         return
     fi
-    echo "[*] Docker not found, installing via get.docker.com ..."
+    echo "[*] Docker не найден, устанавливаю через get.docker.com ..."
     curl -fsSL https://get.docker.com | sh
 }
 
@@ -42,44 +42,32 @@ prompt() {
     printf -v "$__resultvar" '%s' "$__input"
 }
 
-port_is_free() {
-    ! ss -tulpn 2>/dev/null | grep -q ":$1 "
-}
-
 run_wizard() {
     echo
-    echo "== Domain Monitor Server - setup =="
-    echo "Telegram is the only management interface - no web UI."
+    echo "== Установка Server =="
+    echo "Telegram - единственный способ управления, веб-интерфейса нет."
     echo
 
     local admin_key public_url port bot_token admin_id telegram_proxy
 
-    local generated_key
-    generated_key="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))' 2>/dev/null || head -c32 /dev/urandom | base64 | tr -d '/+=' | head -c43)"
-    prompt admin_key "Admin API key (for direct REST API/scripting use)" "$generated_key"
+    admin_key="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))' 2>/dev/null || head -c32 /dev/urandom | base64 | tr -d '/+=' | head -c43)"
+    public_url="http://$(curl -s -4 -m 3 ifconfig.me 2>/dev/null || hostname)"
+    port="$(find_free_port 8000)"
 
-    prompt public_url "Public address agents will reach this server at" "http://$(curl -s -4 -m 3 ifconfig.me 2>/dev/null || hostname)"
-
-    while true; do
-        prompt port "Port to listen on" "8000"
-        if port_is_free "$port"; then
-            break
-        fi
-        echo "Port $port is already in use on this host (ss -tulpn | grep :$port to see by what). Pick another."
-    done
-
+    echo "Адрес: $public_url   Порт: $port   (поменять можно потом в .env)"
     echo
+
     while true; do
-        prompt bot_token "Telegram BOT_TOKEN (from @BotFather)" ""
+        prompt bot_token "Telegram BOT_TOKEN (от @BotFather)" ""
         [[ "$bot_token" =~ ^[0-9]+:[A-Za-z0-9_-]{30,}$ ]] && break
-        echo "Doesn't look like a valid bot token (expected: <digits>:<35+ chars>)."
+        echo "Не похоже на токен бота (формат: <цифры>:<30+ символов>)."
     done
     while true; do
-        prompt admin_id "Your Telegram ADMIN_ID (numeric, e.g. from @userinfobot)" ""
+        prompt admin_id "Твой Telegram ADMIN_ID (цифры, узнать у @userinfobot)" ""
         [[ "$admin_id" =~ ^-?[0-9]+$ ]] && break
-        echo "Must be numeric."
+        echo "Должно быть числом."
     done
-    prompt telegram_proxy "Proxy for reaching Telegram, if this host needs one (blank = none)" ""
+    prompt telegram_proxy "Прокси для Telegram, если этот сервер без него не достучится (Enter - не нужен)" ""
 
     cp "$PROJECT_DIR/.env.example" "$ENV_FILE"
     sed -i "s|^ADMIN_API_KEY=.*|ADMIN_API_KEY=${admin_key}|" "$ENV_FILE"
@@ -93,31 +81,27 @@ run_wizard() {
     chmod 600 "$ENV_FILE"
 
     if [ -z "${telegram_proxy:-}" ]; then
-        echo
-        echo "[*] Checking Telegram reachability from this host ..."
         if curl -fsS -m 8 "https://api.telegram.org/bot${bot_token}/getMe" | grep -q '"ok":true'; then
-            echo "    OK - Telegram is reachable directly."
+            echo "[*] Telegram доступен напрямую с этого сервера - хорошо."
         else
-            echo "    WARNING: could not reach Telegram directly from this host."
-            echo "    If Telegram is blocked on this network, set TELEGRAM_PROXY in .env"
-            echo "    (proxy scheme must be plain socks5:// or http://, not socks5h://)."
+            echo "[!] Не удалось достучаться до Telegram напрямую."
+            echo "    Если он заблокирован на этой сети, пропиши TELEGRAM_PROXY в .env и перезапусти."
         fi
     fi
 
     echo
-    echo "[*] Building and starting the server ..."
-    if ! (cd "$PROJECT_DIR" && compose up -d --build); then
+    if ! (cd "$PROJECT_DIR" && compose_build_quiet); then
         echo
-        echo "[FAILED] Build/start did not complete - see the error above."
-        echo "         Fix the issue, then retry with: cd $PROJECT_DIR && sudo bash install.sh"
+        echo "[ОШИБКА] Сборка/запуск не завершились - см. ошибку выше." >&2
+        echo "         Исправь и повтори: cd $PROJECT_DIR && sudo bash install.sh" >&2
         exit 1
     fi
 
     install_cli_wrapper
     echo
-    echo "[OK] Server installed and running."
-    echo "     Open your bot in Telegram and send /start."
-    echo "     Status: domain-monitor-server status"
+    echo "[OK] Server установлен и запущен."
+    echo "     Открой бота в Telegram и отправь /start."
+    echo "     Статус: domain-monitor-server status"
 }
 
 install_cli_wrapper() {
