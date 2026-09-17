@@ -17,6 +17,10 @@ beyond a small retry buffer; all of that lives on the Server.
 
 ## Quick start
 
+> Setting up the server and an agent on the same box? Use the unified
+> installer at the repo root instead - it can do both:
+> `curl -fsSL https://raw.githubusercontent.com/Theraf1u/domain-monitor/main/install.sh | sudo bash`
+
 ```bash
 git clone <this-repo> domain-monitor-agent
 cd domain-monitor-agent

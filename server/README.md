@@ -59,6 +59,10 @@ README for the agent installer.
 
 ## Quick start
 
+> If you want the server and an agent on the same box, or you'd rather
+> pick interactively, use the unified installer at the repo root instead:
+> `curl -fsSL https://raw.githubusercontent.com/Theraf1u/domain-monitor/main/install.sh | sudo bash`
+
 ```bash
 git clone https://github.com/Theraf1u/domain-monitor.git
 cd domain-monitor/server
