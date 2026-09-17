@@ -15,7 +15,7 @@ import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
 
-from app.models import Domain, Event, FilterRule, Node, Session, User
+from app.models import Domain, Event, FilterRule, Node
 
 logger = logging.getLogger(__name__)
 
@@ -338,107 +338,6 @@ class Database:
                 (key, value),
             )
             self._conn.commit()
-
-    # ------------------------------------------------------------------
-    # Users (Web Admin)
-    # ------------------------------------------------------------------
-
-    def create_user(self, username: str, password_hash: str, password_salt: str, role: str) -> User:
-        with self._lock:
-            self._conn.execute(
-                "INSERT INTO users (username, password_hash, password_salt, role, created_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (username, password_hash, password_salt, role, _now()),
-            )
-            self._conn.commit()
-            cur = self._conn.execute("SELECT * FROM users WHERE username = ?", (username,))
-            return self._row_to_user(cur.fetchone())
-
-    def get_user_by_username(self, username: str) -> User | None:
-        with self._lock:
-            cur = self._conn.execute("SELECT * FROM users WHERE username = ?", (username,))
-            row = cur.fetchone()
-            return self._row_to_user(row) if row else None
-
-    def get_user(self, user_id: int) -> User | None:
-        with self._lock:
-            cur = self._conn.execute("SELECT * FROM users WHERE id = ?", (user_id,))
-            row = cur.fetchone()
-            return self._row_to_user(row) if row else None
-
-    def any_user_exists(self) -> bool:
-        with self._lock:
-            cur = self._conn.execute("SELECT 1 FROM users LIMIT 1")
-            return cur.fetchone() is not None
-
-    def list_users(self) -> list[User]:
-        with self._lock:
-            cur = self._conn.execute("SELECT * FROM users ORDER BY username ASC")
-            return [self._row_to_user(r) for r in cur.fetchall()]
-
-    def set_user_password(self, user_id: int, password_hash: str, password_salt: str) -> None:
-        with self._lock:
-            self._conn.execute(
-                "UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?",
-                (password_hash, password_salt, user_id),
-            )
-            self._conn.commit()
-
-    def set_user_role(self, user_id: int, role: str) -> None:
-        with self._lock:
-            self._conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
-            self._conn.commit()
-
-    def delete_user(self, user_id: int) -> None:
-        with self._lock:
-            self._conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
-            self._conn.commit()
-
-    @staticmethod
-    def _row_to_user(row: sqlite3.Row) -> User:
-        return User(
-            id=row["id"], username=row["username"], password_hash=row["password_hash"],
-            password_salt=row["password_salt"], role=row["role"], created_at=_parse_ts(row["created_at"]),
-        )
-
-    # ------------------------------------------------------------------
-    # Sessions (Web Admin)
-    # ------------------------------------------------------------------
-
-    def create_session(self, session_id: str, user_id: int, expires_at: datetime) -> None:
-        with self._lock:
-            self._conn.execute(
-                "INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
-                (session_id, user_id, _now(), _fmt_ts(expires_at)),
-            )
-            self._conn.commit()
-
-    def get_session(self, session_id: str) -> Session | None:
-        with self._lock:
-            cur = self._conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
-            row = cur.fetchone()
-            if row is None:
-                return None
-            return Session(
-                id=row["id"], user_id=row["user_id"],
-                created_at=_parse_ts(row["created_at"]), expires_at=_parse_ts(row["expires_at"]),
-            )
-
-    def delete_session(self, session_id: str) -> None:
-        with self._lock:
-            self._conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
-            self._conn.commit()
-
-    def delete_sessions_for_user(self, user_id: int) -> None:
-        with self._lock:
-            self._conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
-            self._conn.commit()
-
-    def purge_expired_sessions(self) -> int:
-        with self._lock:
-            cur = self._conn.execute("DELETE FROM sessions WHERE expires_at < ?", (_now(),))
-            self._conn.commit()
-            return cur.rowcount
 
     # ------------------------------------------------------------------
     # Filter rules (ignore / allow / watch)

@@ -4,6 +4,7 @@ single-node MVP."""
 from __future__ import annotations
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from app.config import Config
@@ -14,9 +15,8 @@ from app.telegram.middleware import AdminOnlyMiddleware
 
 
 def build_bot_and_dispatcher(config: Config, db: Database, notifier: Notifier) -> tuple[Bot, Dispatcher]:
-    assert config.bot_token and config.admin_id is not None
-
-    bot = Bot(token=config.bot_token)
+    session = AiohttpSession(proxy=config.telegram_proxy) if config.telegram_proxy else None
+    bot = Bot(token=config.bot_token, session=session)
     dp = Dispatcher(storage=MemoryStorage())
 
     admin_only = AdminOnlyMiddleware(config.admin_id)

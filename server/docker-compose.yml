@@ -4,13 +4,16 @@ services:
     image: domain-monitor-server:latest
     container_name: domain-monitor-server
     restart: unless-stopped
+    # host networking (not a bridge + published port) so the server can
+    # reach a host-local proxy (e.g. TELEGRAM_PROXY pointing at a VPN
+    # client's local SOCKS5 port) that a bridge network's NAT often can't
+    # route to. PORT is read at container start - see Dockerfile.
+    network_mode: host
     env_file: .env
-    ports:
-      - "${PORT:-8000}:8000"
     volumes:
       - ./data:/data
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:${PORT:-8000}/healthz"]
       interval: 30s
       timeout: 5s
       start_period: 10s

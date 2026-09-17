@@ -82,16 +82,20 @@ else
     fail "Database file not found at $DB_FILE" "It's created on first start; check container logs if it's missing after a while."
 fi
 
-# Telegram (optional)
+# Telegram - the only management interface, so this is a hard requirement.
 if grep -q '^BOT_TOKEN=.\+' "$ENV_FILE" 2>/dev/null; then
     BOT_TOKEN="$(grep -oP '^BOT_TOKEN=\K.*' "$ENV_FILE")"
-    if curl -fsS -m 8 "https://api.telegram.org/bot${BOT_TOKEN}/getMe" | grep -q '"ok":true'; then
+    PROXY="$(grep -oP '^TELEGRAM_PROXY=\K.*' "$ENV_FILE" 2>/dev/null || true)"
+    CURL_PROXY_ARG=()
+    [ -n "$PROXY" ] && CURL_PROXY_ARG=(-x "$PROXY")
+    if curl -fsS -m 8 "${CURL_PROXY_ARG[@]}" "https://api.telegram.org/bot${BOT_TOKEN}/getMe" | grep -q '"ok":true'; then
         ok "Telegram API reachable, bot token valid"
     else
-        fail "Telegram API not reachable or token invalid" "Check BOT_TOKEN and network/proxy access to api.telegram.org."
+        fail "Telegram API not reachable or token invalid" \
+            "Check BOT_TOKEN, and TELEGRAM_PROXY if Telegram is blocked on this network. Also verify the container itself can reach it: docker logs domain-monitor-server"
     fi
 else
-    ok "Telegram bot not configured (skipped) - running API/Web Admin only"
+    fail "BOT_TOKEN not set in .env" "Telegram is the only management interface - run install.sh again or set BOT_TOKEN/ADMIN_ID by hand."
 fi
 
 # Disk space

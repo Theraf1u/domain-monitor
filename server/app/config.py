@@ -32,8 +32,9 @@ class Config:
     port: int
     public_url: str
     admin_api_key: str
-    bot_token: str | None
-    admin_id: int | None
+    bot_token: str
+    admin_id: int
+    telegram_proxy: str | None
     data_dir: str
     database_path: str
     log_level: str
@@ -58,14 +59,14 @@ def load_config() -> Config:
     os.makedirs(data_dir, exist_ok=True)
     os.makedirs(log_dir, exist_ok=True)
 
-    bot_token = os.environ.get("BOT_TOKEN", "").strip() or None
-    if bot_token and not _BOT_TOKEN_RE.match(bot_token):
+    bot_token = _require("BOT_TOKEN")
+    if not _BOT_TOKEN_RE.match(bot_token):
         raise ConfigError("BOT_TOKEN does not look like a valid Telegram bot token")
 
-    admin_id_raw = os.environ.get("ADMIN_ID", "").strip()
-    if bot_token and not admin_id_raw:
-        raise ConfigError("ADMIN_ID is required when BOT_TOKEN is set")
-    admin_id = int(admin_id_raw) if admin_id_raw else None
+    admin_id_raw = _require("ADMIN_ID")
+    if not admin_id_raw.lstrip("-").isdigit():
+        raise ConfigError("ADMIN_ID must be a numeric Telegram user id")
+    admin_id = int(admin_id_raw)
 
     port = int(_optional("PORT", "8000"))
 
@@ -76,6 +77,7 @@ def load_config() -> Config:
         admin_api_key=admin_api_key,
         bot_token=bot_token,
         admin_id=admin_id,
+        telegram_proxy=os.environ.get("TELEGRAM_PROXY", "").strip() or None,
         data_dir=data_dir,
         database_path=database_path,
         log_level=_optional("LOG_LEVEL", "INFO").upper(),

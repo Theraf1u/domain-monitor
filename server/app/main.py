@@ -1,18 +1,16 @@
-"""FastAPI application entrypoint. Also starts the (optional) Telegram bot
-and the notification batching loop as background asyncio tasks alongside
-uvicorn's own event loop - one process, one lifespan."""
+"""FastAPI application entrypoint. Serves the agent-facing REST API and
+runs the Telegram bot as a background asyncio task alongside uvicorn's own
+event loop. Telegram is the only human-facing control surface - there is
+no browser UI."""
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from contextlib import asynccontextmanager
-
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse, Response
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.api import domains, events, nodes, stats
@@ -22,25 +20,37 @@ from app.logging_config import setup_logging
 from app.metrics import DOMAINS_TOTAL, NODES_ONLINE, NODES_TOTAL
 from app.notifier import Notifier
 from app.retention import RetentionTask
-from app.webadmin.broadcaster import EventBroadcaster
-from app.webadmin.deps import RequiresLogin
-from app.webadmin import routes_auth, routes_pages, ws as webadmin_ws
+from app.telegram.bot import build_bot_and_dispatcher
 
 logger = logging.getLogger(__name__)
 
-_STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "webadmin", "static")
 
-
-async def _session_gc_loop(db: Database, stopped: asyncio.Event) -> None:
+async def _run_polling_forever(dp, bot, stopped: asyncio.Event) -> None:
+    """Wraps dp.start_polling() with a restart-on-crash loop. Long-poll
+    connections can get cut by an intermediate proxy/NAT (observed: a
+    SOCKS5 proxy silently dropping the connection) - without this, one
+    dropped connection would permanently kill the bot until the container
+    is manually restarted."""
+    backoff = 1
     while not stopped.is_set():
         try:
-            await asyncio.to_thread(db.purge_expired_sessions)
+            # handle_signals=False: this task runs inside uvicorn's own
+            # event loop/process - aiogram installing its own SIGTERM/SIGINT
+            # handlers here would fight with uvicorn's, since asyncio only
+            # keeps the last handler registered for a given signal.
+            await dp.start_polling(bot, polling_timeout=20, handle_signals=False)
+            backoff = 1  # a clean return (e.g. dp.stop_polling()) resets backoff
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            logger.exception("Session GC failed")
+            logger.exception("Telegram polling crashed, restarting in %ss", backoff)
+        if stopped.is_set():
+            return
         try:
-            await asyncio.wait_for(stopped.wait(), timeout=3600)
+            await asyncio.wait_for(stopped.wait(), timeout=backoff)
         except asyncio.TimeoutError:
             pass
+        backoff = min(backoff * 2, 30)
 
 
 @asynccontextmanager
@@ -52,33 +62,22 @@ async def lifespan(app: FastAPI):
     db = Database(config.database_path)
     db.migrate()
 
-    notifier = Notifier(db, config.admin_id or 0)
+    notifier = Notifier(db, config.admin_id)
 
     app.state.config = config
     app.state.db = db
     app.state.notifier = notifier
-    app.state.broadcaster = EventBroadcaster()
 
-    stop_gc = asyncio.Event()
+    stop_polling = asyncio.Event()
     background_tasks = [
         asyncio.create_task(RetentionTask(db, config.event_retention_days).run()),
-        asyncio.create_task(_session_gc_loop(db, stop_gc)),
+        asyncio.create_task(notifier.run()),
     ]
 
-    bot = None
-    dp = None
-    notifier_task = asyncio.create_task(notifier.run())
-    background_tasks.append(notifier_task)
-
-    if config.bot_token and config.admin_id is not None:
-        from app.telegram.bot import build_bot_and_dispatcher
-
-        bot, dp = build_bot_and_dispatcher(config, db, notifier)
-        notifier.set_bot(bot)
-        background_tasks.append(asyncio.create_task(dp.start_polling(bot)))
-        logger.info("Telegram bot enabled (admin_id=%s)", config.admin_id)
-    else:
-        logger.info("Telegram bot disabled (BOT_TOKEN/ADMIN_ID not set) - running API-only")
+    bot, dp = build_bot_and_dispatcher(config, db, notifier)
+    notifier.set_bot(bot)
+    background_tasks.append(asyncio.create_task(_run_polling_forever(dp, bot, stop_polling)))
+    logger.info("Telegram bot enabled (admin_id=%s)", config.admin_id)
 
     logger.info("Domain Monitor Server started on %s:%s", config.host, config.port)
     try:
@@ -86,12 +85,11 @@ async def lifespan(app: FastAPI):
     finally:
         logger.info("Shutting down")
         notifier.stop()
-        stop_gc.set()
+        stop_polling.set()
         for task in background_tasks:
             task.cancel()
         await asyncio.gather(*background_tasks, return_exceptions=True)
-        if bot is not None:
-            await bot.session.close()
+        await bot.session.close()
         db.close()
 
 
@@ -101,16 +99,6 @@ app.include_router(nodes.router)
 app.include_router(events.router)
 app.include_router(domains.router)
 app.include_router(stats.router)
-
-app.include_router(routes_auth.router)
-app.include_router(routes_pages.router)
-app.include_router(webadmin_ws.router)
-app.mount("/admin/static", StaticFiles(directory=_STATIC_DIR), name="webadmin-static")
-
-
-@app.exception_handler(RequiresLogin)
-async def _requires_login_handler(request: Request, exc: RequiresLogin) -> RedirectResponse:
-    return RedirectResponse(f"/admin/login?next={request.url.path}", status_code=303)
 
 
 @app.get("/healthz")

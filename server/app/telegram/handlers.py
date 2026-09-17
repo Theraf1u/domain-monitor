@@ -380,8 +380,7 @@ async def cb_settings(call: CallbackQuery, config: Config) -> None:
     text = (
         "⚙️ <b>Настройки</b>\n\n"
         f"Хранение событий: {config.event_retention_days} дн.\n"
-        f"Нода считается offline после: {config.node_offline_after_seconds} сек без heartbeat\n\n"
-        "Расширенные настройки (ignore/watch-листы, источники, роли) доступны в Web Admin."
+        f"Нода считается offline после: {config.node_offline_after_seconds} сек без heartbeat"
     )
     await call.message.edit_text(text, parse_mode="HTML", reply_markup=kb.settings_menu())
     await call.answer()

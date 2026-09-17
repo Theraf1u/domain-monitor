@@ -1,9 +1,9 @@
 """Shared FastAPI dependencies: database access and the two auth schemes.
 
 Two independent auth schemes exist side by side:
-  - Admin auth (`X-Admin-Key` header) - for managing nodes/settings. A
-    single shared secret for now; Stage D (Web Admin) replaces this with
-    proper login/session/roles without changing agent-facing endpoints.
+  - Admin auth (`X-Admin-Key` header) - for managing nodes/settings via the
+    REST API directly (scripting/CLI use). Day-to-day management is via
+    the Telegram bot, which talks straight to the database, not this API.
   - Node auth (`Authorization: Bearer <token>`) - for an agent pushing its
     own events/heartbeat. Scoped to that one node; a compromised node
     token can never read or modify another node's data.

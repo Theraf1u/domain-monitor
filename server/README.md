@@ -1,9 +1,10 @@
 # Domain Monitor Server
 
 Central backend for multi-node domain monitoring: agents installed on VPN
-nodes push newly-seen TLS SNI domains here over HTTPS; you manage nodes,
-browse domains and watch live traffic through Telegram and/or a built-in
-Web Admin panel.
+nodes push newly-seen domains here over HTTPS; you manage everything -
+nodes, domains, filters, notifications - through a Telegram bot. There is
+no web UI; the REST API exists purely for agents (and optional scripting),
+not for browsing.
 
 ```
                      ┌─ Agent Germany
@@ -17,9 +18,7 @@ Clients → VPN ───────┼─ Agent Netherlands
                               ▼
                     Domain Monitor Server
                               │
-                    ┌─────────┴─────────┐
-                    │                   │
-                Telegram            Web Admin
+                          Telegram
 ```
 
 This is the **Server** half of the project. Install `domain-monitor-agent`
@@ -30,21 +29,19 @@ README for the agent installer.
 
 - **Multi-node**: any number of agents, each authenticated with its own
   revocable token.
-- **REST API** (`/api/v1/*`, documented at `/docs`): nodes, events, domains,
-  stats.
-- **Telegram bot** (optional): node cards, domain browsing, batched
-  new-domain notifications, all inline-button driven.
-- **Web Admin** (`/admin`): login/session auth with Owner/Admin/Viewer
-  roles, dashboard, nodes management, domain search/export, and a live
-  event feed over WebSocket.
+- **REST API** (`/api/v1/*`): nodes, events, domains, stats - what agents
+  talk to, and what you can script against with `X-Admin-Key`.
+- **Telegram bot - the only control surface**: node cards, domain
+  browsing, batched new-domain notifications, Ignore/Allow/Watch list
+  management, all inline-button driven. Only one Telegram account
+  (`ADMIN_ID`) can use it; everyone else is silently ignored.
 - **Event retention**: detailed per-sighting history is purged after
   `EVENT_RETENTION_DAYS`; the aggregated domain list (first/last seen, hit
   count) is kept forever.
 - **Ignore / Allow / Watch lists**: pattern-based rules (exact/suffix/
   wildcard) checked against every incoming domain. Ignore/Allow suppress
   notifications; Watch always fires an instant 🚨 alert (wins over the
-  other two if a domain matches both). Manageable from Web Admin
-  (`/admin/filters`) or Telegram (`🔍 Фильтры`).
+  other two if a domain matches both).
 - **Prometheus metrics** at `/metrics`: `events_total`, `new_domains_total`,
   `watchlist_hits_total`, `telegram_errors_total`, `nodes_online`,
   `nodes_total`, `domains_total`.
@@ -57,31 +54,26 @@ README for the agent installer.
 
 - Docker + Docker Compose (v1 `docker-compose` or the v2 `docker compose`
   plugin - either works).
-- A public (or at least agent-reachable) HTTP(S) endpoint. TLS termination
-  (e.g. via a reverse proxy/Caddy) is on you - the container itself serves
-  plain HTTP.
+- A Telegram bot token (from [@BotFather](https://t.me/BotFather)) and
+  your own numeric Telegram user id (from e.g. [@userinfobot](https://t.me/userinfobot)).
 
 ## Quick start
 
 ```bash
-git clone <this-repo> domain-monitor-server
-cd domain-monitor-server
-cp .env.example .env
-# edit .env: set ADMIN_API_KEY (generate with the command in the comment),
-# PUBLIC_URL, and optionally BOT_TOKEN/ADMIN_ID
-docker compose up -d --build
+git clone https://github.com/Theraf1u/domain-monitor.git
+cd domain-monitor/server
+sudo bash install.sh
 ```
 
-Or run the interactive installer instead (creates `.env` via a wizard,
-builds, starts, and installs the `domain-monitor-server` CLI command):
+The wizard asks for an admin API key (auto-generated, just press Enter),
+the address agents will reach this server at, a free port, your
+`BOT_TOKEN` and `ADMIN_ID`, and (only if this host itself needs one) a
+proxy for reaching Telegram. It checks Telegram reachability and that the
+chosen port is actually free before starting.
 
-```bash
-curl -fsSL https://.../install.sh | sudo bash
-```
-
-Then open `http://<your-host>:8000/admin/` - the first visit walks you
-through creating the Owner account. From there, use **Nodes → + Add node**
-to generate a token and get the install command for `domain-monitor-agent`.
+Once it's up, open your bot in Telegram and send `/start`. From
+**📡 Ноды → ➕ Добавить** you get a token and the exact command to run on
+a new VPN node to install `domain-monitor-agent` there.
 
 ## CLI
 
@@ -103,10 +95,11 @@ uninstall  remove container/image/data (with confirmation)
 
 | Variable | Required | Description |
 |---|---|---|
-| `ADMIN_API_KEY` | yes | Shared secret for the REST API's `X-Admin-Key` auth (node management, stats). Also used to derive Web Admin CSRF tokens. |
-| `PORT` | no | Listen/publish port (default `8000`). |
-| `PUBLIC_URL` | no | Shown to operators when adding a node, as the `SERVER_URL` the agent installer should use. |
-| `BOT_TOKEN` / `ADMIN_ID` | no | Enables the Telegram bot. Leave both blank to run API + Web Admin only. |
+| `ADMIN_API_KEY` | yes | Shared secret for the REST API's `X-Admin-Key` auth (direct scripting; day-to-day management is via Telegram). |
+| `PORT` | no | Port to listen on (default `8000`). The container uses host networking, so this must be free on the host. |
+| `PUBLIC_URL` | no | Shown to you when adding a node, as the `SERVER_URL` the agent installer should use. |
+| `BOT_TOKEN` / `ADMIN_ID` | **yes** | The bot token and your numeric Telegram user id - Telegram is the only management interface, so both are required. |
+| `TELEGRAM_PROXY` | no | Set if this host itself needs a proxy to reach Telegram (e.g. Telegram is blocked on its network). Plain `socks5://` or `http://` only. |
 | `EVENT_RETENTION_DAYS` | no | Detailed event history retention (default `30`, `0` = forever). |
 | `NODE_OFFLINE_AFTER_SECONDS` | no | Heartbeat staleness threshold before a node shows offline (default `90`). |
 | `LOG_LEVEL` | no | Default `INFO`. |
@@ -114,12 +107,9 @@ uninstall  remove container/image/data (with confirmation)
 ## REST API
 
 Two auth schemes:
-- `X-Admin-Key: <ADMIN_API_KEY>` - node/domain/stats management.
+- `X-Admin-Key: <ADMIN_API_KEY>` - node/domain/stats management via direct API calls.
 - `Authorization: Bearer <node token>` - what an agent uses to push its
   own events/heartbeat; scoped to that one node.
-
-Interactive docs at `/docs` (OpenAPI, auto-generated by FastAPI). Key
-endpoints:
 
 ```
 POST   /api/v1/nodes                  create a node, returns its token (shown once)
@@ -135,39 +125,38 @@ GET    /api/v1/domains                search/sort/paginate
 GET    /api/v1/stats                  dashboard numbers
 ```
 
-## Web Admin
-
-`/admin/` - session-based login, three roles:
-
-- **Owner**: everything, including user management.
-- **Admin**: manage nodes, ignore/unignore domains, everything except users.
-- **Viewer**: read-only.
-
-The first account created via `/admin/setup` is always an Owner. CSRF is
-enforced on every state-changing request (double-submit cookie before
-login, session-bound HMAC token after).
-
 ## Telegram bot
 
-Optional. Set `BOT_TOKEN` and `ADMIN_ID` and restart. Every action is an
-inline button; the bot only responds to `ADMIN_ID` (silently ignores
-everyone else, per the same "no commands, no reply keyboards" rule as the
-single-node MVP). Notification batching (Instant / 5s / 15s / 30s / 60s)
-is configurable live from the bot's own menu.
+The only way to manage the server. Every action is an inline button - no
+commands other than `/start`, no reply keyboards. Covers:
+
+- **📡 Ноды** - list, add, revoke/regenerate token, toggle monitoring/notifications, delete.
+- **🌐 Домены** - recent, top by hits, export as `.txt`.
+- **📊 Статистика** - nodes online, unique domains, events/new domains today.
+- **🔔 Уведомления** - global on/off, batching mode (Instant / 5s / 15s / 30s / 60s).
+- **🔍 Фильтры** - Ignore/Allow/Watch list management (exact/suffix/wildcard patterns).
+- **⚙️ Настройки** - current retention/offline-threshold values.
+
+If Telegram is blocked on this server's own network, set `TELEGRAM_PROXY`
+(plain `socks5://` or `http://` - see Configuration above). The bot
+auto-restarts its polling loop if the connection ever drops.
 
 ## Architecture notes
 
-- **Why no ORM**: the schema is small (nodes/domains/events/settings/users/
-  sessions) and every query is simple; a hand-written `sqlite3` wrapper
-  (`app/database.py`) is easier to audit than an ORM layer, at zero extra
-  dependency cost. Moving to Postgres later only touches this one file.
-- **Why server-side sessions, not signed cookies**: a password change or
-  explicit logout needs to actually invalidate a session, which a
-  stateless signed cookie can't do without a revocation list anyway - a
-  `sessions` table gets you that for free.
-- **Why in-process WebSocket fan-out**: this is a single-process
-  deployment; a `set[WebSocket]` in memory is simpler and has fewer moving
-  parts than wiring up Redis pub/sub for one process.
+- **Why no ORM**: the schema is small (nodes/domains/events/settings/
+  filter_rules) and every query is simple; a hand-written `sqlite3`
+  wrapper (`app/database.py`) is easier to audit than an ORM layer, at
+  zero extra dependency cost. Moving to Postgres later only touches this
+  one file.
+- **Why Telegram-only, no web UI**: one less thing to secure (no sessions,
+  no CSRF, no browser attack surface) and one less thing to keep in sync
+  with the bot - a single control surface is simpler to reason about for
+  a tool with exactly one operator.
+- **Why host networking**: the server (and the bot's own outbound
+  connection to Telegram) may need to reach a host-local proxy - bridge
+  networking's NAT frequently can't route to a proxy client's own
+  TUN/loopback interface, while host networking can (see
+  `docker-compose.yml`).
 
 ## Roadmap (not yet built)
 

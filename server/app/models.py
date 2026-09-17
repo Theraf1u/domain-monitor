@@ -50,31 +50,6 @@ class Event:
     received_at: datetime
 
 
-ROLES = ("owner", "admin", "viewer")
-_ROLE_RANK = {"viewer": 0, "admin": 1, "owner": 2}
-
-
-@dataclass(frozen=True)
-class User:
-    id: int
-    username: str
-    password_hash: str
-    password_salt: str
-    role: str
-    created_at: datetime
-
-    def has_at_least(self, role: str) -> bool:
-        return _ROLE_RANK[self.role] >= _ROLE_RANK[role]
-
-
-@dataclass(frozen=True)
-class Session:
-    id: str
-    user_id: int
-    created_at: datetime
-    expires_at: datetime
-
-
 @dataclass(frozen=True)
 class FilterRule:
     id: int
