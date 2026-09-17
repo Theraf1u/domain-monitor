@@ -13,6 +13,8 @@
 #   domain-monitor-server backup     сделать бэкап БД + конфига в ./backups
 #   domain-monitor-server restore <f> восстановить из файла бэкапа
 #   domain-monitor-server add-node   добавить ноду в одно действие (без имени)
+#   domain-monitor-server migrate-export        собрать пакет для переноса на другой сервер
+#   domain-monitor-server migrate-import <файл> перенести бота с другого сервера из пакета
 set -uo pipefail
 
 # Resolve through the /usr/local/bin symlink the installer creates - a
@@ -39,7 +41,9 @@ case "$cmd" in
     backup)    bash "$SCRIPTS_DIR/backup.sh" ;;
     restore)   bash "$SCRIPTS_DIR/restore.sh" "${2:-}" ;;
     add-node)  bash "$SCRIPTS_DIR/add_node.sh" ;;
-    -h|--help|help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' ;;
+    migrate-export) bash "$SCRIPTS_DIR/migrate_export.sh" ;;
+    migrate-import) bash "$SCRIPTS_DIR/migrate_import.sh" "${2:-}" ;;
+    -h|--help|help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//' ;;
     *)
         echo "Неизвестная команда: $cmd" >&2
         echo "Запусти 'domain-monitor-server help' для справки." >&2

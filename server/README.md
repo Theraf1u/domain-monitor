@@ -92,6 +92,9 @@ update     pull latest code, rebuild, restart
 doctor     run diagnostics
 backup     back up database + config to ./backups
 restore <file>  restore from a backup
+add-node   add a node in one action (no name needed)
+migrate-export           package everything for moving this server to another host
+migrate-import <file>    import a package made by migrate-export on another host
 uninstall  remove container/image/data (with confirmation)
 ```
 

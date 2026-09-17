@@ -12,6 +12,7 @@
 #   domain-monitor-agent doctor     запустить диагностику
 #   domain-monitor-agent backup     сделать бэкап локального буфера + конфига в ./backups
 #   domain-monitor-agent restore <f> восстановить из файла бэкапа
+#   domain-monitor-agent set-server <url> перенаправить агент на другой сервер
 set -uo pipefail
 
 # Resolve through the /usr/local/bin symlink the installer creates - a
@@ -37,7 +38,8 @@ case "$cmd" in
     doctor)    bash "$SCRIPTS_DIR/doctor.sh" ;;
     backup)    bash "$SCRIPTS_DIR/backup.sh" ;;
     restore)   bash "$SCRIPTS_DIR/restore.sh" "${2:-}" ;;
-    -h|--help|help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' ;;
+    set-server) bash "$SCRIPTS_DIR/set_server.sh" "${2:-}" ;;
+    -h|--help|help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' ;;
     *)
         echo "Неизвестная команда: $cmd" >&2
         echo "Запусти 'domain-monitor-agent help' для справки." >&2

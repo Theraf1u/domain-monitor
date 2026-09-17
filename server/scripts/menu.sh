@@ -14,8 +14,10 @@ while true; do
     echo "6) Бэкап"
     echo "7) Восстановить"
     echo "8) Добавить ноду"
-    echo "9) Удалить"
-    echo "10) Выход"
+    echo "9) Перенос на другой сервер - собрать пакет"
+    echo "10) Перенос на другой сервер - принять пакет"
+    echo "11) Удалить"
+    echo "12) Выход"
     read -r -p "> " choice </dev/tty
     case "$choice" in
         1) bash "$PROJECT_DIR/scripts/healthcheck.sh" ;;
@@ -26,8 +28,10 @@ while true; do
         6) bash "$PROJECT_DIR/scripts/backup.sh" ;;
         7) read -r -p "Имя файла бэкапа (в ./backups): " f </dev/tty; bash "$PROJECT_DIR/scripts/restore.sh" "$f" ;;
         8) bash "$PROJECT_DIR/scripts/add_node.sh" ;;
-        9) bash "$PROJECT_DIR/scripts/uninstall.sh"; exit 0 ;;
-        10) exit 0 ;;
+        9) bash "$PROJECT_DIR/scripts/migrate_export.sh" ;;
+        10) read -r -p "Путь к файлу пакета миграции: " f </dev/tty; bash "$PROJECT_DIR/scripts/migrate_import.sh" "$f" ;;
+        11) bash "$PROJECT_DIR/scripts/uninstall.sh"; exit 0 ;;
+        12) exit 0 ;;
         *) echo "Неверный выбор" ;;
     esac
 done

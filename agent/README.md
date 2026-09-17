@@ -53,6 +53,7 @@ update     pull latest code, rebuild, restart
 doctor     run diagnostics (Docker, .env, tshark, capture caps, server reachability, disk)
 backup     back up local buffer + config to ./backups
 restore <file>  restore from a backup
+set-server <url>  point this agent at a different server (keeps its node token)
 uninstall  remove container/image/data (with confirmation)
 ```
 
