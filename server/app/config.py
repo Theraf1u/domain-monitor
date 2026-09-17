@@ -8,6 +8,7 @@ import secrets
 from dataclasses import dataclass
 
 _BOT_TOKEN_RE = re.compile(r"^\d+:[A-Za-z0-9_-]{30,}$")
+_TELEGRAM_PROXY_RE = re.compile(r"^(socks5|http)://\S+:\d+$")
 
 
 class ConfigError(RuntimeError):
@@ -68,7 +69,14 @@ def load_config() -> Config:
         raise ConfigError("ADMIN_ID must be a numeric Telegram user id")
     admin_id = int(admin_id_raw)
 
-    port = int(_optional("PORT", "8000"))
+    port = int(_optional("PORT", "8280"))
+
+    telegram_proxy = os.environ.get("TELEGRAM_PROXY", "").strip() or None
+    if telegram_proxy is not None and not _TELEGRAM_PROXY_RE.match(telegram_proxy):
+        raise ConfigError(
+            "TELEGRAM_PROXY does not look like a valid proxy URL "
+            "(expected socks5://host:port or http://host:port, no socks5h)"
+        )
 
     return Config(
         host=_optional("HOST", "0.0.0.0"),
@@ -77,7 +85,7 @@ def load_config() -> Config:
         admin_api_key=admin_api_key,
         bot_token=bot_token,
         admin_id=admin_id,
-        telegram_proxy=os.environ.get("TELEGRAM_PROXY", "").strip() or None,
+        telegram_proxy=telegram_proxy,
         data_dir=data_dir,
         database_path=database_path,
         log_level=_optional("LOG_LEVEL", "INFO").upper(),

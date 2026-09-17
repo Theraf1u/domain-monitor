@@ -52,7 +52,7 @@ run_wizard() {
 
     admin_key="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))' 2>/dev/null || head -c32 /dev/urandom | base64 | tr -d '/+=' | head -c43)"
     public_url="http://$(curl -s -4 -m 3 ifconfig.me 2>/dev/null || hostname)"
-    port="$(find_free_port 8000)"
+    port="$(find_free_port 8280)"
 
     echo "Адрес: $public_url   Порт: $port   (поменять можно потом в .env)"
     echo
@@ -67,7 +67,12 @@ run_wizard() {
         [[ "$admin_id" =~ ^-?[0-9]+$ ]] && break
         echo "Должно быть числом."
     done
-    prompt telegram_proxy "Прокси для Telegram, если этот сервер без него не достучится (Enter - не нужен)" ""
+    while true; do
+        prompt telegram_proxy "Прокси для Telegram, если этот сервер без него не достучится (Enter - не нужен)" ""
+        [ -z "$telegram_proxy" ] && break
+        [[ "$telegram_proxy" =~ ^(socks5|http)://[^[:space:]]+:[0-9]+$ ]] && break
+        echo "Не похоже на прокси (формат: socks5://host:port или http://host:port, без пробелов; socks5h не поддерживается)."
+    done
 
     cp "$PROJECT_DIR/.env.example" "$ENV_FILE"
     sed -i "s|^ADMIN_API_KEY=.*|ADMIN_API_KEY=${admin_key}|" "$ENV_FILE"

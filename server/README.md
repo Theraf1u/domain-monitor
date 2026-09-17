@@ -100,7 +100,7 @@ uninstall  remove container/image/data (with confirmation)
 | Variable | Required | Description |
 |---|---|---|
 | `ADMIN_API_KEY` | yes | Shared secret for the REST API's `X-Admin-Key` auth (direct scripting; day-to-day management is via Telegram). |
-| `PORT` | no | Port to listen on (default `8000`). The container uses host networking, so this must be free on the host. |
+| `PORT` | no | Port to listen on (default `8280`). The container uses host networking, so this must be free on the host. |
 | `PUBLIC_URL` | no | Shown to you when adding a node, as the `SERVER_URL` the agent installer should use. |
 | `BOT_TOKEN` / `ADMIN_ID` | **yes** | The bot token and your numeric Telegram user id - Telegram is the only management interface, so both are required. |
 | `TELEGRAM_PROXY` | no | Set if this host itself needs a proxy to reach Telegram (e.g. Telegram is blocked on its network). Plain `socks5://` or `http://` only. |

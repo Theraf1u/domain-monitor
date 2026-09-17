@@ -57,7 +57,7 @@ else
 fi
 
 # HTTP reachability
-PORT="$(grep -oP '^PORT=\K.*' "$ENV_FILE" 2>/dev/null || echo 8000)"
+PORT="$(grep -oP '^PORT=\K.*' "$ENV_FILE" 2>/dev/null || echo 8280)"
 if curl -fsS -m 5 "http://localhost:${PORT}/healthz" >/dev/null 2>&1; then
     ok "HTTP /healthz отвечает на порту $PORT"
 else

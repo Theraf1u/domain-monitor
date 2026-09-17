@@ -24,12 +24,12 @@ port_is_free() {
     ! ss -tulpn 2>/dev/null | grep -q ":$1 "
 }
 
-# Scans upward from $1 (default 8000) for the first free port - used as
+# Scans upward from $1 (default 8280) for the first free port - used as
 # the wizard's default so pressing Enter almost always just works,
-# instead of always suggesting 8000 and making the user retype it when
+# instead of always suggesting 8280 and making the user retype it when
 # it's already taken (which is common on a box running other services).
 find_free_port() {
-    local port="${1:-8000}"
+    local port="${1:-8280}"
     while ! port_is_free "$port"; do
         port=$((port + 1))
     done
