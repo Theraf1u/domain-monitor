@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Adds a node via the local REST API (no name required - the server
 # auto-assigns a placeholder, renamed to the node's real IP on its first
-# heartbeat), mirroring the bot's one-tap "Добавить" button. Prints the
-# ready-to-paste Server URL / Node Token block for the agent installer.
+# heartbeat), mirroring the bot's one-tap "Добавить" button. Prints one
+# ready-to-paste install command for the new node - server URL and token
+# are baked in, nothing to type there.
 set -uo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$PROJECT_DIR/.env"
@@ -43,12 +44,11 @@ fi
 cat <<EOF
 ✅ Нода ${name} создана.
 
-Токен (сохраните, показывается один раз):
-${token}
+Выполните на новой ноде одну команду (сервер и токен уже внутри):
 
-На новом сервере выполните установщик агента (см. README проекта), указав в мастере:
-Server URL: ${PUBLIC_URL}
-Node Token: ${token}
+curl -fsSL https://raw.githubusercontent.com/Theraf1u/domain-monitor/main/install.sh | sudo bash -s -- agent "${PUBLIC_URL}" "${token}"
 
-После первого подключения нода автоматически переименуется в свой IP.
+Токен показывается только сейчас - если команду не скопировать, придётся создать ноду заново.
+
+После установки нода сама переименуется в свой IP.
 EOF

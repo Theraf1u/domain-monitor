@@ -58,23 +58,31 @@ detect_node_ip() {
 }
 
 run_wizard() {
+    # $1/$2, if both given and well-formed, skip the interactive prompts
+    # entirely - this is what lets the bot/CLI "Добавить ноду" flow hand
+    # the user one ready-to-paste command instead of a URL and a token to
+    # copy into two separate prompts.
+    local server_url="${1:-}" node_token="${2:-}"
+
     echo
     echo "== Установка Agent =="
     echo
 
-    local server_url node_token
+    if [[ "$server_url" =~ ^https?:// ]] && [[ "$node_token" == nmt_* ]]; then
+        echo "Server URL и Node Token получены из команды - пропускаю вопросы."
+    else
+        while true; do
+            prompt server_url "Server URL (например https://monitor.example.com)" ""
+            [[ "$server_url" =~ ^https?:// ]] && break
+            echo "Должен начинаться с http:// или https://"
+        done
 
-    while true; do
-        prompt server_url "Server URL (например https://monitor.example.com)" ""
-        [[ "$server_url" =~ ^https?:// ]] && break
-        echo "Должен начинаться с http:// или https://"
-    done
-
-    while true; do
-        prompt node_token "Node Token (получен на сервере: Ноды -> Добавить)" ""
-        [[ "$node_token" == nmt_* ]] && break
-        echo "Не похоже на токен ноды (должен начинаться с nmt_)."
-    done
+        while true; do
+            prompt node_token "Node Token (получен на сервере: Ноды -> Добавить)" ""
+            [[ "$node_token" == nmt_* ]] && break
+            echo "Не похоже на токен ноды (должен начинаться с nmt_)."
+        done
+    fi
 
     local node_label
     node_label="$(detect_node_ip)"
@@ -87,7 +95,7 @@ run_wizard() {
     chmod 600 "$ENV_FILE"
 
     echo "Метка ноды (для локальных логов): ${node_label}, интерфейс: any (поменять можно потом в .env)"
-    echo "Имя, под которым нода видна в боте, задаётся на сервере при создании токена (Ноды -> Добавить)."
+    echo "В боте нода видна под своим временным именем, при первом подключении сама переименуется в свой IP."
     echo
     if ! (cd "$PROJECT_DIR" && compose_build_quiet); then
         echo
@@ -112,7 +120,7 @@ main() {
     check_root
     install_docker_if_missing
     if [ ! -f "$ENV_FILE" ]; then
-        run_wizard
+        run_wizard "${1:-}" "${2:-}"
     else
         install_cli_wrapper
         exec bash "$SCRIPTS_DIR/menu.sh"

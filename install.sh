@@ -554,6 +554,16 @@ main() {
         update_all
         exit 0
     fi
+    # Non-interactive one-liner used by the bot's/CLI's "Добавить ноду":
+    #   curl ... | sudo bash -s -- agent <server_url> <node_token>
+    # Skips the menu and the agent's own wizard prompts entirely - the
+    # whole point of the one-tap flow is that the person on the new node
+    # doesn't have to answer anything, just paste and run.
+    if [ "${1:-}" = "agent" ] && [ -n "${2:-}" ] && [ -n "${3:-}" ]; then
+        resolve_project_dir
+        install_dm_command
+        exec bash "$PROJECT_DIR/agent/install-agent.sh" "$2" "$3"
+    fi
     resolve_project_dir
     install_dm_command
     show_menu

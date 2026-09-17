@@ -321,21 +321,30 @@ async def cb_node_delete(call: CallbackQuery, db: Database, config: Config) -> N
     await cb_nodes(call, db, config)
 
 
+_INSTALL_ONE_LINER = (
+    "curl -fsSL https://raw.githubusercontent.com/Theraf1u/domain-monitor/main/install.sh "
+    '| sudo bash -s -- agent "{server_url}" "{token}"'
+)
+
+
 @router.callback_query(F.data == "node_add")
 async def cb_node_add(call: CallbackQuery, db: Database, config: Config) -> None:
     """One tap, zero typing: creates the node with an auto-assigned
     placeholder name (renamed to its real IP on first heartbeat, see
-    Database.touch_heartbeat) and hands back a ready-to-paste token."""
+    Database.touch_heartbeat) and hands back one ready-to-paste command -
+    server URL and token are baked into it, nothing to type on the new
+    node, no separate wizard prompts to answer there."""
     token = generate_node_token()
     node = db.create_node_auto(hash_token(token))
+    command = _INSTALL_ONE_LINER.format(server_url=config.public_url, token=token)
     await call.message.edit_text(
         f"✅ Нода <b>{node.name}</b> создана.\n\n"
-        f"Токен (сохраните, показывается один раз):\n<code>{token}</code>\n\n"
-        f"На новом сервере выполните установщик агента (см. README проекта), указав в мастере:\n"
-        f"Server URL: <code>{config.public_url}</code>\n"
-        f"Node Token: <code>{token}</code>\n\n"
-        f"После первого подключения нода автоматически переименуется в свой IP. "
-        f"Своё имя можно задать в любой момент через карточку ноды («✏️ Переименовать»).",
+        f"Выполните на новой ноде одну команду (сервер и токен уже внутри):\n"
+        f"<pre>{command}</pre>\n"
+        f"Токен показывается только сейчас — если команду не скопировать, "
+        f"придётся создать ноду заново.\n\n"
+        f"После установки нода сама переименуется в свой IP. Своё имя можно "
+        f"задать в любой момент через карточку ноды («✏️ Переименовать»).",
         parse_mode="HTML", reply_markup=kb.back_button("nodes"),
     )
     await call.answer()
