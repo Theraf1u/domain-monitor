@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app import fleet_control
+from app import fleet_control, runtime_settings
 from app.api.deps import get_config, get_db, require_admin, require_node
 from app.api.schemas import (
     HeartbeatRequest,
@@ -34,7 +34,8 @@ def create_node(body: NodeCreateRequest, db: Database = Depends(get_db)) -> Node
 
 @router.get("", response_model=list[NodeResponse], dependencies=[Depends(require_admin)])
 def list_nodes(db: Database = Depends(get_db), config: Config = Depends(get_config)) -> list[NodeResponse]:
-    return [NodeResponse.from_node(n, config.node_offline_after_seconds) for n in db.list_nodes()]
+    offline_after = runtime_settings.get_node_offline_after_seconds(db, config)
+    return [NodeResponse.from_node(n, offline_after) for n in db.list_nodes()]
 
 
 @router.get("/{node_id}", response_model=NodeResponse, dependencies=[Depends(require_admin)])
@@ -42,7 +43,7 @@ def get_node(node_id: int, db: Database = Depends(get_db), config: Config = Depe
     node = db.get_node(node_id)
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
-    return NodeResponse.from_node(node, config.node_offline_after_seconds)
+    return NodeResponse.from_node(node, runtime_settings.get_node_offline_after_seconds(db, config))
 
 
 @router.patch("/{node_id}", response_model=NodeResponse, dependencies=[Depends(require_admin)])
@@ -57,7 +58,7 @@ def update_node_settings(
         db.set_node_monitoring(node_id, body.monitoring_enabled)
     if body.notifications_enabled is not None:
         db.set_node_notifications(node_id, body.notifications_enabled)
-    return NodeResponse.from_node(db.get_node(node_id), config.node_offline_after_seconds)
+    return NodeResponse.from_node(db.get_node(node_id), runtime_settings.get_node_offline_after_seconds(db, config))
 
 
 @router.post("/{node_id}/regenerate-token", response_model=NodeCreateResponse, dependencies=[Depends(require_admin)])

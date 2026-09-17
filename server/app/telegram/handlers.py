@@ -4,9 +4,8 @@ keyboards" rule carried over from the single-node MVP.
 """
 from __future__ import annotations
 
-import io
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -14,9 +13,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
-from app import fleet_control
+from app import fleet_control, runtime_settings
 from app.config import Config
 from app.database import Database
+from app.filters import classify_domain, normalize_domain
 from app.notifier import Notifier
 from app.security import generate_node_token, hash_token
 from app.telegram import keyboards as kb
@@ -25,15 +25,41 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
 
 class Inputs(StatesGroup):
     waiting_for_node_name = State()
     waiting_for_filter_pattern = State()
+    waiting_for_filter_check = State()
+    waiting_for_export_range = State()
+    waiting_for_custom_batch_seconds = State()
+    waiting_for_retention_days = State()
+    waiting_for_offline_seconds = State()
 
 
 def _online_ids(db: Database, config: Config) -> set[int]:
     now = datetime.now(timezone.utc)
-    return {n.id for n in db.list_nodes() if n.is_online(config.node_offline_after_seconds, now)}
+    offline_after = runtime_settings.get_node_offline_after_seconds(db, config)
+    return {n.id for n in db.list_nodes() if n.is_online(offline_after, now)}
+
+
+def _period_range(period: str, now: datetime) -> tuple[datetime | None, datetime | None]:
+    """Maps a period key (shared by the export and stats menus) to a
+    [since, until) window. None on either side means "no bound in that
+    direction" - "all" is (None, None)."""
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if period == "today":
+        return today_start, None
+    if period == "yesterday":
+        return today_start - timedelta(days=1), today_start
+    if period == "24h":
+        return now - timedelta(hours=24), None
+    if period in ("7d", "week"):
+        return now - timedelta(days=7), None
+    if period in ("30d", "month"):
+        return now - timedelta(days=30), None
+    return None, None  # "all"
 
 
 # ------------------------------------------------------------------
@@ -105,14 +131,14 @@ async def cb_node_card(call: CallbackQuery, db: Database, config: Config) -> Non
         return
 
     now = datetime.now(timezone.utc)
-    online = node.is_online(config.node_offline_after_seconds, now)
+    offline_after = runtime_settings.get_node_offline_after_seconds(db, config)
+    online = node.is_online(offline_after, now)
     status_line = "🟢 Online" if online else ("⛔ Отозвана" if node.status == "revoked" else "🔴 Offline")
     hb_line = "никогда"
     if node.last_heartbeat_at:
         delta = int((now - node.last_heartbeat_at).total_seconds())
         hb_line = f"{delta} сек назад"
 
-    events_today = db.count_events_since(now.replace(hour=0, minute=0, second=0, microsecond=0))
     domains = db.list_domains(limit=1000, node_id=node.id)
 
     text = (
@@ -194,8 +220,8 @@ async def cb_node_delete(call: CallbackQuery, db: Database, config: Config) -> N
 async def cb_node_add(call: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(Inputs.waiting_for_node_name)
     await call.message.edit_text(
-        "Введите имя новой ноды (например: <code>Germany-1</code>):",
-        parse_mode="HTML", reply_markup=kb.cancel_input(),
+        "Введите имя новой ноды (например: <code>Germany-1</code> или её IP):",
+        parse_mode="HTML", reply_markup=kb.cancel_input("nodes"),
     )
     await call.answer()
 
@@ -258,33 +284,144 @@ async def cb_domains_top(call: CallbackQuery, db: Database) -> None:
 
 
 @router.callback_query(F.data == "domains_export")
-async def cb_domains_export(call: CallbackQuery, db: Database) -> None:
-    domains = db.list_domains(limit=100000, order_by="domain")
-    content = "\n".join(d.domain for d in domains) + ("\n" if domains else "")
-    file = BufferedInputFile(content.encode("utf-8"), filename="domains.txt")
-    await call.message.answer_document(file, caption=f"Экспорт: {len(domains)} домен(ов)")
+async def cb_domains_export_menu(call: CallbackQuery) -> None:
+    await call.message.edit_text(
+        "📤 <b>Экспорт доменов</b>\n\nЗа какой период выгрузить .txt?",
+        parse_mode="HTML", reply_markup=kb.export_period_menu(),
+    )
     await call.answer()
+
+
+@router.callback_query(F.data.startswith("domains_export_period:"))
+async def cb_domains_export_period(call: CallbackQuery, db: Database) -> None:
+    period = call.data.split(":", 1)[1]
+    now = datetime.now(timezone.utc)
+    since, until = _period_range(period, now)
+    label = dict(kb.EXPORT_PERIODS).get(period, period)
+    domains = db.list_domains(limit=1_000_000, order_by="domain", since=since, until=until)
+    if not domains:
+        await call.answer(f"За период «{label}» доменов нет", show_alert=True)
+        return
+    content = "\n".join(d.domain for d in domains) + "\n"
+    file = BufferedInputFile(content.encode("utf-8"), filename="domains.txt")
+    await call.message.answer_document(file, caption=f"Экспорт ({label}): {len(domains)} домен(ов)")
+    await call.answer()
+
+
+@router.callback_query(F.data == "domains_export_custom")
+async def cb_domains_export_custom(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(Inputs.waiting_for_export_range)
+    await call.message.edit_text(
+        "Введите период в формате <code>ГГГГ-ММ-ДД</code> (один день) или "
+        "<code>ГГГГ-ММ-ДД ГГГГ-ММ-ДД</code> (с — по, включительно):",
+        parse_mode="HTML", reply_markup=kb.cancel_input("domains_export"),
+    )
+    await call.answer()
+
+
+@router.message(Inputs.waiting_for_export_range)
+async def on_export_range_input(message: Message, state: FSMContext, db: Database) -> None:
+    await state.clear()
+    text = (message.text or "").strip()
+    parts = text.split()
+    try:
+        if len(parts) == 1:
+            day = datetime.strptime(parts[0], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            since, until = day, day + timedelta(days=1)
+        elif len(parts) == 2:
+            start = datetime.strptime(parts[0], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            end = datetime.strptime(parts[1], "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+            since, until = start, end
+        else:
+            raise ValueError
+    except ValueError:
+        await message.answer(
+            "Не понял формат. Пример: <code>2026-09-01</code> или <code>2026-09-01 2026-09-15</code>.",
+            parse_mode="HTML", reply_markup=kb.back_button("domains_export"),
+        )
+        return
+
+    domains = db.list_domains(limit=1_000_000, order_by="domain", since=since, until=until)
+    if not domains:
+        await message.answer("За этот диапазон доменов нет.", reply_markup=kb.back_button("domains"))
+        return
+    content = "\n".join(d.domain for d in domains) + "\n"
+    file = BufferedInputFile(content.encode("utf-8"), filename="domains.txt")
+    await message.answer_document(file, caption=f"Экспорт ({text}): {len(domains)} домен(ов)")
+    await message.answer("Готово.", reply_markup=kb.back_button("domains"))
+
+
+@router.callback_query(F.data.startswith("data_reset:"))
+async def cb_data_reset_prompt(call: CallbackQuery) -> None:
+    back_target = call.data.split(":", 1)[1]
+    await call.message.edit_text(
+        "🗑 <b>Сброс данных</b>\n\n"
+        "Это удалит ВСЕ собранные домены и историю событий на сервере.\n"
+        "Ноды, токены, фильтры и настройки не затрагиваются.\n\n"
+        "Действие необратимо.",
+        parse_mode="HTML", reply_markup=kb.confirm_reset_data(back_target),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("data_reset_confirm:"))
+async def cb_data_reset_confirm(call: CallbackQuery, db: Database, config: Config) -> None:
+    back_target = call.data.split(":", 1)[1]
+    domains_count, events_count = db.reset_domains_and_events()
+    await call.answer(f"Удалено: {domains_count} доменов, {events_count} событий", show_alert=True)
+    if back_target == "stats":
+        await call.message.edit_text(
+            _stats_text(db, config, "today"), parse_mode="HTML", reply_markup=kb.stats_menu("today"),
+        )
+    else:
+        await cb_domains(call)
 
 
 # ------------------------------------------------------------------
 # Stats
 # ------------------------------------------------------------------
 
+def _stats_text(db: Database, config: Config, period: str) -> str:
+    now = datetime.now(timezone.utc)
+    since, until = _period_range(period, now)
+    offline_after = runtime_settings.get_node_offline_after_seconds(db, config)
+    nodes = db.list_nodes()
+    online = sum(1 for n in nodes if n.is_online(offline_after, now))
+
+    events_count = db.count_events_since(since or _EPOCH, until)
+    new_domains = db.count_domains(since=since, until=until)
+    total_domains = db.count_domains()
+    top_nodes = db.top_active_nodes_since(since or _EPOCH, limit=3)
+
+    period_label = dict(kb.STATS_PERIODS).get(period, period)
+    rate_line = ""
+    if since is not None:
+        hours = max((now - since).total_seconds() / 3600, 1 / 60)
+        rate_line = f"Скорость: ~{events_count / hours:.1f} событий/час\n"
+
+    top_lines = "\n".join(f"  {i + 1}. {name} — {count}" for i, (name, count) in enumerate(top_nodes)) or "  —"
+
+    return (
+        f"📊 <b>Статистика</b> ({period_label})\n\n"
+        f"Ноды онлайн: {online}/{len(nodes)}\n"
+        f"Уникальных доменов (всего): {total_domains}\n"
+        f"Новых доменов за период: {new_domains}\n"
+        f"Событий за период: {events_count}\n"
+        f"{rate_line}"
+        f"\nАктивные ноды за период:\n{top_lines}"
+    )
+
+
 @router.callback_query(F.data == "stats")
 async def cb_stats(call: CallbackQuery, db: Database, config: Config) -> None:
-    now = datetime.now(timezone.utc)
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    nodes = db.list_nodes()
-    online = sum(1 for n in nodes if n.is_online(config.node_offline_after_seconds, now))
+    await call.message.edit_text(_stats_text(db, config, "today"), parse_mode="HTML", reply_markup=kb.stats_menu("today"))
+    await call.answer()
 
-    text = (
-        "📊 <b>Статистика</b>\n\n"
-        f"Ноды онлайн: {online}/{len(nodes)}\n"
-        f"Уникальных доменов: {db.count_domains()}\n"
-        f"Событий сегодня: {db.count_events_since(today_start)}\n"
-        f"Новых доменов сегодня: {db.count_domains(since=today_start)}"
-    )
-    await call.message.edit_text(text, parse_mode="HTML", reply_markup=kb.back_button("main"))
+
+@router.callback_query(F.data.startswith("stats_period:"))
+async def cb_stats_period(call: CallbackQuery, db: Database, config: Config) -> None:
+    period = call.data.split(":", 1)[1]
+    await call.message.edit_text(_stats_text(db, config, period), parse_mode="HTML", reply_markup=kb.stats_menu(period))
     await call.answer()
 
 
@@ -316,6 +453,30 @@ async def cb_notify_mode(call: CallbackQuery, notifier: Notifier) -> None:
     await call.answer("Режим обновлён")
 
 
+@router.callback_query(F.data == "notify_custom")
+async def cb_notify_custom(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(Inputs.waiting_for_custom_batch_seconds)
+    await call.message.edit_text(
+        "Введите свой интервал группировки в секундах (1–3600):",
+        reply_markup=kb.cancel_input("notify_menu"),
+    )
+    await call.answer()
+
+
+@router.message(Inputs.waiting_for_custom_batch_seconds)
+async def on_custom_batch_seconds_input(message: Message, state: FSMContext, notifier: Notifier) -> None:
+    await state.clear()
+    raw = (message.text or "").strip()
+    if not raw.isdigit() or not (1 <= int(raw) <= 3600):
+        await message.answer(
+            "Нужно целое число секунд от 1 до 3600. Попробуйте снова из меню уведомлений.",
+            reply_markup=kb.back_button("notify_menu"),
+        )
+        return
+    notifier.set_batch_mode(raw)
+    await message.answer(f"✅ Интервал группировки: {raw} сек.", reply_markup=kb.back_button("notify_menu"))
+
+
 # ------------------------------------------------------------------
 # Filters (ignore / allow / watch)
 # ------------------------------------------------------------------
@@ -334,20 +495,40 @@ async def cb_filters(call: CallbackQuery, db: Database) -> None:
 
 @router.callback_query(F.data.startswith("filters_list:"))
 async def cb_filters_list(call: CallbackQuery, db: Database) -> None:
-    list_type = call.data.split(":", 1)[1]
+    _, list_type, page_raw = call.data.split(":")
+    page = int(page_raw)
     rules = db.list_filter_rules(list_type)
     title = {"watch": "🚨 Watch List", "ignore": "🚫 Ignore List", "allow": "✅ Allow List"}[list_type]
     text = title if rules else f"{title}\n\nПусто"
-    await call.message.edit_text(text, reply_markup=kb.filters_list(list_type, rules))
+    await call.message.edit_text(text, reply_markup=kb.filters_list(list_type, rules, page))
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("filter_remove_confirm:"))
+async def cb_filter_remove_confirm(call: CallbackQuery, db: Database) -> None:
+    _, rule_id_raw, page_raw = call.data.split(":")
+    rule_id, page = int(rule_id_raw), int(page_raw)
+    rule = next((r for r in db.list_filter_rules() if r.id == rule_id), None)
+    if rule is None:
+        await call.answer("Правило не найдено", show_alert=True)
+        return
+    tag = kb.PATTERN_TAG.get(rule.pattern_type, rule.pattern_type)
+    await call.message.edit_text(
+        f"Удалить правило <code>{rule.pattern}</code> ({tag}) из {rule.list_type}?",
+        parse_mode="HTML", reply_markup=kb.confirm_remove_filter(rule, page),
+    )
     await call.answer()
 
 
 @router.callback_query(F.data.startswith("filter_remove:"))
 async def cb_filter_remove(call: CallbackQuery, db: Database) -> None:
-    rule_id = int(call.data.split(":")[1])
-    db.remove_filter_rule(rule_id)
+    _, rule_id_raw, list_type, page_raw = call.data.split(":")
+    db.remove_filter_rule(int(rule_id_raw))
     await call.answer("Удалено")
-    await cb_filters(call, db)
+    rules = db.list_filter_rules(list_type)
+    title = {"watch": "🚨 Watch List", "ignore": "🚫 Ignore List", "allow": "✅ Allow List"}[list_type]
+    text = title if rules else f"{title}\n\nПусто"
+    await call.message.edit_text(text, reply_markup=kb.filters_list(list_type, rules, int(page_raw)))
 
 
 @router.callback_query(F.data == "filter_add")
@@ -375,7 +556,7 @@ async def cb_filter_add_ptype(call: CallbackQuery, state: FSMContext) -> None:
         "exact": "api.example.com (только этот домен)",
         "wildcard": "*.example.com (шаблон)",
     }[pattern_type]
-    await call.message.edit_text(f"Введите паттерн, например: {hint}", reply_markup=kb.cancel_input())
+    await call.message.edit_text(f"Введите паттерн, например: {hint}", reply_markup=kb.cancel_input("filters"))
     await call.answer()
 
 
@@ -394,19 +575,105 @@ async def on_filter_pattern_input(message: Message, state: FSMContext, db: Datab
         await message.answer(f"✅ Добавлено в {data['list_type']}: <code>{pattern}</code>", parse_mode="HTML", reply_markup=kb.back_button("filters"))
 
 
+@router.callback_query(F.data == "filter_check")
+async def cb_filter_check(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(Inputs.waiting_for_filter_check)
+    await call.message.edit_text(
+        "Введите домен, чтобы проверить, как его обработают текущие правила:",
+        reply_markup=kb.cancel_input("filters"),
+    )
+    await call.answer()
+
+
+@router.message(Inputs.waiting_for_filter_check)
+async def on_filter_check_input(message: Message, state: FSMContext, db: Database) -> None:
+    await state.clear()
+    domain = normalize_domain((message.text or "").strip())
+    if domain is None:
+        await message.answer("Не похоже на домен. Попробуйте снова из меню фильтров.", reply_markup=kb.back_button("filters"))
+        return
+    verdict = classify_domain(domain, db.all_filter_rules_cached())
+    if verdict.is_watched:
+        result = "🚨 Watch — сработает мгновенное уведомление, даже если попадает под Ignore/Allow"
+    elif verdict.suppresses_notification:
+        result = "🔕 Подавлен (Ignore/Allow) — уведомления не будет"
+    else:
+        result = "🔔 Обычный домен — уведомление придёт по текущему режиму группировки"
+    await message.answer(f"<code>{domain}</code>\n\n{result}", parse_mode="HTML", reply_markup=kb.back_button("filters"))
+
+
 # ------------------------------------------------------------------
-# Settings (minimal for now - extended in a later stage)
+# Settings
 # ------------------------------------------------------------------
 
 @router.callback_query(F.data == "settings")
-async def cb_settings(call: CallbackQuery, config: Config) -> None:
+async def cb_settings(call: CallbackQuery, db: Database, config: Config, notifier: Notifier) -> None:
+    retention_days = runtime_settings.get_event_retention_days(db, config)
+    offline_seconds = runtime_settings.get_node_offline_after_seconds(db, config)
     text = (
         "⚙️ <b>Настройки</b>\n\n"
-        f"Хранение событий: {config.event_retention_days} дн.\n"
-        f"Нода считается offline после: {config.node_offline_after_seconds} сек без heartbeat"
+        f"Хранение событий: {retention_days} дн. (0 — хранить всегда; не влияет на список доменов, "
+        f"только на детальную историю)\n"
+        f"Нода считается offline после: {offline_seconds} сек без heartbeat\n"
+        f"Watch-уведомления: {'включены' if notifier.is_watchlist_enabled() else 'выключены'}"
     )
-    await call.message.edit_text(text, parse_mode="HTML", reply_markup=kb.settings_menu())
+    await call.message.edit_text(
+        text, parse_mode="HTML",
+        reply_markup=kb.settings_menu(retention_days, offline_seconds, notifier.is_watchlist_enabled()),
+    )
     await call.answer()
+
+
+@router.callback_query(F.data == "settings_retention")
+async def cb_settings_retention(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(Inputs.waiting_for_retention_days)
+    await call.message.edit_text(
+        "Сколько дней хранить детальную историю событий? (0 — хранить всегда)",
+        reply_markup=kb.cancel_input("settings"),
+    )
+    await call.answer()
+
+
+@router.message(Inputs.waiting_for_retention_days)
+async def on_retention_days_input(message: Message, state: FSMContext, db: Database) -> None:
+    await state.clear()
+    raw = (message.text or "").strip()
+    if not raw.isdigit() or int(raw) > 3650:
+        await message.answer(
+            "Нужно целое число дней (0–3650). Попробуйте снова из настроек.", reply_markup=kb.back_button("settings"),
+        )
+        return
+    runtime_settings.set_event_retention_days(db, int(raw))
+    await message.answer(f"✅ Хранение событий: {raw} дн.", reply_markup=kb.back_button("settings"))
+
+
+@router.callback_query(F.data == "settings_offline")
+async def cb_settings_offline(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(Inputs.waiting_for_offline_seconds)
+    await call.message.edit_text(
+        "Через сколько секунд без heartbeat нода считается offline?",
+        reply_markup=kb.cancel_input("settings"),
+    )
+    await call.answer()
+
+
+@router.message(Inputs.waiting_for_offline_seconds)
+async def on_offline_seconds_input(message: Message, state: FSMContext, db: Database) -> None:
+    await state.clear()
+    raw = (message.text or "").strip()
+    if not raw.isdigit() or not (10 <= int(raw) <= 86400):
+        await message.answer(
+            "Нужно число секунд от 10 до 86400. Попробуйте снова из настроек.", reply_markup=kb.back_button("settings"),
+        )
+        return
+    runtime_settings.set_node_offline_after_seconds(db, int(raw))
+    await message.answer(f"✅ Offline через: {raw} сек.", reply_markup=kb.back_button("settings"))
+
+
+@router.callback_query(F.data == "settings_toggle_watchlist")
+async def cb_settings_toggle_watchlist(call: CallbackQuery, db: Database, config: Config, notifier: Notifier) -> None:
+    notifier.set_watchlist_enabled(not notifier.is_watchlist_enabled())
+    await cb_settings(call, db, config, notifier)
 
 
 # ------------------------------------------------------------------

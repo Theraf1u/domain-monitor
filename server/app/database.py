@@ -254,6 +254,7 @@ class Database:
     def list_domains(
         self, limit: int = 50, offset: int = 0, search: str | None = None,
         order_by: str = "last_seen", node_id: int | None = None,
+        since: datetime | None = None, until: datetime | None = None,
     ) -> list[Domain]:
         order_col = {
             "last_seen": "last_seen DESC",
@@ -270,6 +271,12 @@ class Database:
         if node_id is not None:
             clauses.append("node_id = ?")
             params.append(node_id)
+        if since is not None:
+            clauses.append("first_seen >= ?")
+            params.append(_fmt_ts(since))
+        if until is not None:
+            clauses.append("first_seen < ?")
+            params.append(_fmt_ts(until))
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
 
         with self._lock:
@@ -279,21 +286,28 @@ class Database:
             )
             return [self._row_to_domain(r) for r in cur.fetchall()]
 
-    def count_domains(self, since: datetime | None = None) -> int:
+    def count_domains(self, since: datetime | None = None, until: datetime | None = None) -> int:
+        clauses: list[str] = []
+        params: list[object] = []
+        if since is not None:
+            clauses.append("first_seen >= ?")
+            params.append(_fmt_ts(since))
+        if until is not None:
+            clauses.append("first_seen < ?")
+            params.append(_fmt_ts(until))
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         with self._lock:
-            if since is None:
-                cur = self._conn.execute("SELECT COUNT(*) FROM domains")
-            else:
-                cur = self._conn.execute(
-                    "SELECT COUNT(*) FROM domains WHERE first_seen >= ?", (_fmt_ts(since),)
-                )
+            cur = self._conn.execute(f"SELECT COUNT(*) FROM domains {where}", params)
             return cur.fetchone()[0]
 
-    def count_events_since(self, since: datetime) -> int:
+    def count_events_since(self, since: datetime, until: datetime | None = None) -> int:
+        clauses = ["occurred_at >= ?"]
+        params: list[object] = [_fmt_ts(since)]
+        if until is not None:
+            clauses.append("occurred_at < ?")
+            params.append(_fmt_ts(until))
         with self._lock:
-            cur = self._conn.execute(
-                "SELECT COUNT(*) FROM events WHERE occurred_at >= ?", (_fmt_ts(since),)
-            )
+            cur = self._conn.execute(f"SELECT COUNT(*) FROM events WHERE {' AND '.join(clauses)}", params)
             return cur.fetchone()[0]
 
     def top_domains(self, limit: int = 10) -> list[Domain]:
@@ -301,11 +315,39 @@ class Database:
             cur = self._conn.execute("SELECT * FROM domains ORDER BY hits DESC LIMIT ?", (limit,))
             return [self._row_to_domain(r) for r in cur.fetchall()]
 
+    def top_active_nodes_since(self, since: datetime, limit: int = 3) -> list[tuple[str, int]]:
+        """(node name, event count) for the most active nodes in a window -
+        a quick read on which node is generating the noise, for the stats
+        screen. Nodes that have since been deleted are excluded (the JOIN
+        drops their events) rather than shown with a blank name."""
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT n.name, COUNT(*) as c FROM events e JOIN nodes n ON n.id = e.node_id "
+                "WHERE e.occurred_at >= ? GROUP BY e.node_id ORDER BY c DESC LIMIT ?",
+                (_fmt_ts(since), limit),
+            )
+            return [(r["name"], r["c"]) for r in cur.fetchall()]
+
     def purge_events_older_than(self, cutoff: datetime) -> int:
         with self._lock:
             cur = self._conn.execute("DELETE FROM events WHERE occurred_at < ?", (_fmt_ts(cutoff),))
             self._conn.commit()
             return cur.rowcount
+
+    def reset_domains_and_events(self) -> tuple[int, int]:
+        """Wipes collected domains and their event history - nodes, filter
+        rules and settings are untouched. Used to start a fresh collection
+        pass (e.g. after switching a node's routing template, see the
+        README note on split-routing hiding domains from the sniffer)."""
+        with self._lock:
+            events_cur = self._conn.execute("SELECT COUNT(*) FROM events")
+            events_count = events_cur.fetchone()[0]
+            domains_cur = self._conn.execute("SELECT COUNT(*) FROM domains")
+            domains_count = domains_cur.fetchone()[0]
+            self._conn.execute("DELETE FROM events")
+            self._conn.execute("DELETE FROM domains")
+            self._conn.commit()
+            return domains_count, events_count
 
     @staticmethod
     def _row_to_domain(row: sqlite3.Row) -> Domain:

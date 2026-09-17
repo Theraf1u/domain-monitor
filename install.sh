@@ -59,6 +59,21 @@ check_root() {
     fi
 }
 
+# The node's public IP, not its hostname - an admin managing several VPN
+# nodes from the bot's node list recognizes "45.137.202.118" at a glance,
+# while a generic cloud-provider hostname tells them nothing. Falls back
+# to hostname if outbound access to ifconfig.me fails, so setup never
+# hard-fails on it.
+detect_node_ip() {
+    local ip
+    ip="$(curl -s -4 -m 3 ifconfig.me 2>/dev/null)"
+    if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$ip"
+    else
+        hostname
+    fi
+}
+
 # If this script is already running from inside a checkout (server/ and
 # agent/ sitting right next to it), use that instead of cloning a second
 # copy - lets `cd domain-monitor && sudo bash install.sh` work too, not
@@ -254,7 +269,7 @@ install_both() {
     echo
     echo "[*] Настраиваю Agent на этой же машине (SERVER_URL=http://127.0.0.1:${port})"
     local node_name interface
-    node_name="$(hostname)"
+    node_name="$(detect_node_ip)"
     interface="any"
     echo "Имя ноды: $node_name, интерфейс: $interface (поменять можно потом в agent/.env)"
 

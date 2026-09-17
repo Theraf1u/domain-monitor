@@ -42,6 +42,21 @@ prompt() {
     printf -v "$__resultvar" '%s' "$__input"
 }
 
+# The node's public IP, not its hostname - an admin managing several VPN
+# nodes from the bot's node list recognizes "45.137.202.118" at a glance,
+# while "24fire" or a generic cloud-provider hostname tells them nothing.
+# Falls back to hostname if outbound access to ifconfig.me fails (offline
+# during setup, egress blocked, etc.) so setup never hard-fails on it.
+detect_node_ip() {
+    local ip
+    ip="$(curl -s -4 -m 3 ifconfig.me 2>/dev/null)"
+    if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$ip"
+    else
+        hostname
+    fi
+}
+
 run_wizard() {
     echo
     echo "== Установка Agent =="
@@ -61,14 +76,18 @@ run_wizard() {
         echo "Не похоже на токен ноды (должен начинаться с nmt_)."
     done
 
+    local node_label
+    node_label="$(detect_node_ip)"
+
     cp "$PROJECT_DIR/.env.example" "$ENV_FILE"
     sed -i "s|^SERVER_URL=.*|SERVER_URL=${server_url}|" "$ENV_FILE"
     sed -i "s|^NODE_TOKEN=.*|NODE_TOKEN=${node_token}|" "$ENV_FILE"
-    sed -i "s|^NODE_NAME=.*|NODE_NAME=$(hostname)|" "$ENV_FILE"
+    sed -i "s|^NODE_NAME=.*|NODE_NAME=${node_label}|" "$ENV_FILE"
     sed -i "s|^INTERFACE=.*|INTERFACE=any|" "$ENV_FILE"
     chmod 600 "$ENV_FILE"
 
-    echo "Имя ноды: $(hostname), интерфейс: any (поменять можно потом в .env)"
+    echo "Метка ноды (для локальных логов): ${node_label}, интерфейс: any (поменять можно потом в .env)"
+    echo "Имя, под которым нода видна в боте, задаётся на сервере при создании токена (Ноды -> Добавить)."
     echo
     if ! (cd "$PROJECT_DIR" && compose_build_quiet); then
         echo

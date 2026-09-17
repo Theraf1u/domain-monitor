@@ -13,6 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
+from app import runtime_settings
 from app.api import domains, events, nodes, stats
 from app.config import load_config
 from app.database import Database
@@ -70,7 +71,7 @@ async def lifespan(app: FastAPI):
 
     stop_polling = asyncio.Event()
     background_tasks = [
-        asyncio.create_task(RetentionTask(db, config.event_retention_days).run()),
+        asyncio.create_task(RetentionTask(db, config).run()),
         asyncio.create_task(notifier.run()),
     ]
 
@@ -111,8 +112,9 @@ def metrics(request: Request) -> Response:
     db: Database = request.app.state.db
     config = request.app.state.config
     now = datetime.now(timezone.utc)
+    offline_after_seconds = runtime_settings.get_node_offline_after_seconds(db, config)
     nodes_list = db.list_nodes()
     NODES_TOTAL.set(len(nodes_list))
-    NODES_ONLINE.set(sum(1 for n in nodes_list if n.is_online(config.node_offline_after_seconds, now)))
+    NODES_ONLINE.set(sum(1 for n in nodes_list if n.is_online(offline_after_seconds, now)))
     DOMAINS_TOTAL.set(db.count_domains())
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
