@@ -471,30 +471,43 @@ toggle_auto_update() {
     fi
 }
 
+print_script_menu_box() {
+    local au_status="$1" au_label
+    if [ "$au_status" = "включено" ]; then
+        au_label="${C_OK}включено${C_RESET}"
+    else
+        au_label="${C_OFF}выключено${C_RESET}"
+    fi
+    box_top
+    box_line "1) Переустановить    - полный снос и установка заново" "${C_NUM}1)${C_RESET} Переустановить    - полный снос и установка заново"
+    box_line "2) Удалить           - снести всё, что тут стоит" "${C_NUM}2)${C_RESET} Удалить           - снести всё, что тут стоит"
+    box_line "3) Обновить          - git pull + пересборка компонентов" "${C_NUM}3)${C_RESET} Обновить          - git pull + пересборка компонентов"
+    box_line "4) Автообновление ($au_status)" "${C_NUM}4)${C_RESET} Автообновление (${au_label})"
+    box_line "5) Назад" "${C_NUM}5)${C_RESET} Назад"
+    box_bottom
+}
+
 script_management_menu() {
     while true; do
-        echo
         local au_status
         if is_auto_update_enabled; then
             au_status="включено"
         else
             au_status="выключено"
         fi
-        echo "== Управление скриптом =="
-        echo "1) Переустановить    - полный снос и установка заново"
-        echo "2) Удалить           - снести всё, что тут стоит"
-        echo "3) Обновить          - git pull + пересборка установленных компонентов"
-        echo "4) Автообновление ($au_status)"
-        echo "5) Назад"
+        print_banner
+        printf "${C_LABEL}Управление скриптом${C_RESET}\n\n"
+        print_script_menu_box "$au_status"
+        echo
         local choice
-        read -r -p "Выбор [1-5]: " choice </dev/tty
+        read -r -p "$(printf "${C_LABEL}Выбор${C_RESET} ${C_OFF}[1-5]${C_RESET}: ")" choice </dev/tty
         case "$choice" in
             1) reinstall_all; return ;;
             2) uninstall_all; exit 0 ;;
-            3) update_all ;;
-            4) toggle_auto_update ;;
+            3) update_all; read -r -p "Enter - назад в меню" _ </dev/tty ;;
+            4) toggle_auto_update; read -r -p "Enter - назад в меню" _ </dev/tty ;;
             5) return ;;
-            *) echo "Неверный выбор." ;;
+            *) echo "Неверный выбор."; sleep 1 ;;
         esac
     done
 }
