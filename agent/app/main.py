@@ -23,7 +23,7 @@ async def _run() -> None:
         config.node_label, config.interface, ",".join(config.sources), config.server_url,
     )
 
-    buffer = Buffer(config.database_path, config.max_buffer_size)
+    buffer = Buffer(config.database_path, config.max_buffer_bytes)
     buffer.migrate()
 
     remote_control = RemoteControl()

@@ -127,7 +127,7 @@ POST   /api/v1/nodes/{id}/regenerate-token
 POST   /api/v1/nodes/{id}/revoke
 DELETE /api/v1/nodes/{id}
 POST   /api/v1/nodes/heartbeat        agent-auth: version/ip/hostname
-POST   /api/v1/events                 agent-auth: batch of {domain, source, occurred_at}
+POST   /api/v1/events                 agent-auth: batch of {domain, source, occurred_at, hits}
 GET    /api/v1/domains                search/sort/paginate
 GET    /api/v1/stats                  dashboard numbers
 ```

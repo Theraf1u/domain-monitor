@@ -39,7 +39,7 @@ class UplinkTask:
         while not self._stopped.is_set():
             if not self.remote_control.sending_enabled:
                 # Paused from Telegram - leave the outbox alone (it keeps
-                # accumulating, bounded by max_buffer_size) and just wait
+                # accumulating, bounded by max_buffer_bytes) and just wait
                 # for the next heartbeat to possibly clear the flag.
                 sent = 0
             else:
@@ -76,7 +76,7 @@ class UplinkTask:
 
         payload = {
             "events": [
-                {"domain": e.domain, "source": e.source, "occurred_at": e.occurred_at}
+                {"domain": e.domain, "source": e.source, "occurred_at": e.occurred_at, "hits": e.hits}
                 for e in batch
             ]
         }

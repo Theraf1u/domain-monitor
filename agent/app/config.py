@@ -36,7 +36,7 @@ class Config:
     batch_interval_seconds: int
     batch_max_size: int
     heartbeat_interval_seconds: int
-    max_buffer_size: int
+    max_buffer_bytes: int
     http_timeout_seconds: int
 
 
@@ -70,6 +70,6 @@ def load_config() -> Config:
         batch_interval_seconds=int(_optional("BATCH_INTERVAL_SECONDS", "5")),
         batch_max_size=int(_optional("BATCH_MAX_SIZE", "200")),
         heartbeat_interval_seconds=int(_optional("HEARTBEAT_INTERVAL_SECONDS", "30")),
-        max_buffer_size=int(_optional("MAX_BUFFER_SIZE", "50000")),
+        max_buffer_bytes=int(_optional("MAX_BUFFER_BYTES", str(1024 * 1024 * 1024))),
         http_timeout_seconds=int(_optional("HTTP_TIMEOUT_SECONDS", "10")),
     )

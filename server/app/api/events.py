@@ -62,9 +62,9 @@ async def ingest_events(
     for event in body.events:
         occurred_at = event.occurred_at or datetime.now(timezone.utc)
         domain_row, is_new = await asyncio.to_thread(
-            db.record_event, node.id, event.domain, event.source, occurred_at
+            db.record_event, node.id, event.domain, event.source, occurred_at, event.hits
         )
-        EVENTS_TOTAL.inc()
+        EVENTS_TOTAL.inc(event.hits)
         if is_new:
             new_domains.append(domain_row.domain)
             NEW_DOMAINS_TOTAL.inc()

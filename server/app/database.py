@@ -264,17 +264,23 @@ class Database:
     # Domains + events
     # ------------------------------------------------------------------
 
-    def record_event(self, node_id: int, domain: str, source: str, occurred_at: datetime) -> tuple[Domain, bool]:
+    def record_event(
+        self, node_id: int, domain: str, source: str, occurred_at: datetime, hits: int = 1,
+    ) -> tuple[Domain, bool]:
         """Insert an event row and upsert the aggregate `domains` row.
-        Returns (domain_row, is_new)."""
+        `hits` lets one received event represent more than one real
+        occurrence - the agent collapses repeats of the same domain into
+        a single buffered row with a counter instead of storing (and
+        later sending) a near-identical row per hit. Returns
+        (domain_row, is_new)."""
         with self._lock:
             now = _now()
             occurred_str = _fmt_ts(occurred_at)
 
             self._conn.execute(
-                "INSERT INTO events (node_id, domain, source, occurred_at, received_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (node_id, domain, source, occurred_str, now),
+                "INSERT INTO events (node_id, domain, source, occurred_at, received_at, hits) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (node_id, domain, source, occurred_str, now, hits),
             )
 
             cur = self._conn.execute("SELECT * FROM domains WHERE domain = ?", (domain,))
@@ -283,16 +289,16 @@ class Database:
                 self._conn.execute(
                     "INSERT INTO domains "
                     "(domain, first_seen, last_seen, hits, node_id, ignored, notification_sent) "
-                    "VALUES (?, ?, ?, 1, ?, 0, 0)",
-                    (domain, occurred_str, occurred_str, node_id),
+                    "VALUES (?, ?, ?, ?, ?, 0, 0)",
+                    (domain, occurred_str, occurred_str, hits, node_id),
                 )
                 self._conn.commit()
                 cur = self._conn.execute("SELECT * FROM domains WHERE domain = ?", (domain,))
                 return self._row_to_domain(cur.fetchone()), True
 
             self._conn.execute(
-                "UPDATE domains SET last_seen = ?, hits = hits + 1, node_id = ? WHERE id = ?",
-                (occurred_str, node_id, row["id"]),
+                "UPDATE domains SET last_seen = ?, hits = hits + ?, node_id = ? WHERE id = ?",
+                (occurred_str, hits, node_id, row["id"]),
             )
             self._conn.commit()
             cur = self._conn.execute("SELECT * FROM domains WHERE id = ?", (row["id"],))
@@ -379,7 +385,9 @@ class Database:
             clauses.append("occurred_at < ?")
             params.append(_fmt_ts(until))
         with self._lock:
-            cur = self._conn.execute(f"SELECT COUNT(*) FROM events WHERE {' AND '.join(clauses)}", params)
+            cur = self._conn.execute(
+                f"SELECT COALESCE(SUM(hits), 0) FROM events WHERE {' AND '.join(clauses)}", params
+            )
             return cur.fetchone()[0]
 
     def top_domains(self, limit: int = 10) -> list[Domain]:
@@ -394,7 +402,7 @@ class Database:
         drops their events) rather than shown with a blank name."""
         with self._lock:
             cur = self._conn.execute(
-                "SELECT n.name, COUNT(*) as c FROM events e JOIN nodes n ON n.id = e.node_id "
+                "SELECT n.name, SUM(e.hits) as c FROM events e JOIN nodes n ON n.id = e.node_id "
                 "WHERE e.occurred_at >= ? GROUP BY e.node_id ORDER BY c DESC LIMIT ?",
                 (_fmt_ts(since), limit),
             )

@@ -91,6 +91,13 @@ class EventIn(BaseModel):
     domain: str
     occurred_at: datetime | None = None
     source: str = "tls_sni"
+    # How many real occurrences this one event represents - the agent
+    # collapses repeats of the same domain in its local buffer into one
+    # row with a counter instead of storing/sending one row per hit.
+    # Bounded well above anything a real outage could legitimately
+    # produce, as a sanity ceiling against a malformed or compromised
+    # agent trying to inflate a domain's hit count.
+    hits: int = Field(default=1, ge=1, le=1_000_000)
 
     @field_validator("domain")
     @classmethod

@@ -68,7 +68,7 @@ uninstall  remove container/image/data (with confirmation)
 | `LOG_LEVEL` | no | Default `INFO`. |
 | `BATCH_INTERVAL_SECONDS` / `BATCH_MAX_SIZE` | no | How often / how many events per HTTP push (defaults `5` / `200`). |
 | `HEARTBEAT_INTERVAL_SECONDS` | no | Default `30`. |
-| `MAX_BUFFER_SIZE` | no | Local outbox cap (default `50000`); oldest events are dropped first if the server is unreachable for a long time. |
+| `MAX_BUFFER_BYTES` | no | Local outbox cap in bytes (default `1073741824`, 1 GiB), by estimated on-disk size, not event count. The outbox stores one row per domain (repeat hits bump a counter, not a new row), and least-recently-seen domains are dropped first if the server is unreachable long enough to hit the cap. |
 | `SOURCES` | no | Comma-separated detection sources to run (default `tls_sni`). Currently implemented: `tls_sni`, `dns`. Each runs its own `tshark` process; an unknown name is ignored with a warning rather than failing startup. |
 
 ## How it works
