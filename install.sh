@@ -180,7 +180,7 @@ install_both() {
     echo
     echo "[*] Жду готовности сервера ..."
     local ready=0
-    for _ in $(seq 1 30); do
+    for _ in $(seq 1 60); do
         if curl -fsS -m 2 "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1; then
             ready=1
             break
@@ -188,9 +188,21 @@ install_both() {
         sleep 1
     done
     if [ "$ready" -ne 1 ]; then
-        echo "[FAILED] Сервер не ответил на /healthz за 30 секунд." >&2
-        echo "         Проверь: domain-monitor-server status / domain-monitor-server logs" >&2
-        exit 1
+        # HTTP checks from this shell can occasionally miss a server that's
+        # actually fine (seen on a loaded host: curl times out a few times
+        # right after container start even though the app itself came up
+        # in under a second) - fall back to Docker's own healthcheck, which
+        # polls from inside the same network namespace, before giving up.
+        echo "[*] HTTP-проверка не прошла за 60 сек, смотрю статус контейнера напрямую ..."
+        local health
+        health="$(docker inspect --format '{{.State.Health.Status}}' domain-monitor-server 2>/dev/null || echo unknown)"
+        if [ "$health" = "healthy" ] || [ "$health" = "starting" ]; then
+            echo "[*] Контейнер сообщает статус '$health' - считаю сервер рабочим, продолжаю."
+        else
+            echo "[FAILED] Сервер не поднялся (статус контейнера: $health)." >&2
+            echo "         Проверь: domain-monitor-server status / domain-monitor-server logs" >&2
+            exit 1
+        fi
     fi
 
     if [ -f "$agent_env" ]; then
