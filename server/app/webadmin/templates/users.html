@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Users — Domain Monitor{% endblock %}
+{% block content %}
+<h1>Users</h1>
+
+<div class="toolbar">
+  <form method="post" action="/admin/users/create" style="display:flex;gap:8px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="text" name="username" placeholder="Логин" required minlength="3">
+    <input type="password" name="password" placeholder="Пароль" required minlength="8">
+    <select name="role">
+      <option value="viewer">Viewer</option>
+      <option value="admin">Admin</option>
+      <option value="owner">Owner</option>
+    </select>
+    <button class="btn" type="submit">➕ Создать</button>
+  </form>
+</div>
+
+<table>
+  <thead><tr><th>Логин</th><th>Роль</th><th>Создан</th><th></th></tr></thead>
+  <tbody>
+    {% for u in users %}
+    <tr>
+      <td>{{ u.username }}</td>
+      <td><span class="pill {{ u.role }}">{{ u.role }}</span></td>
+      <td>{{ u.created_at.strftime('%Y-%m-%d') }}</td>
+      <td>
+        {% if u.id != user.id %}
+        <form method="post" action="/admin/users/{{ u.id }}/delete" onsubmit="return confirm('Удалить пользователя {{ u.username }}?');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="btn danger" type="submit">🗑</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

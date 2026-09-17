@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Settings — Domain Monitor{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+<table>
+  <tbody>
+    <tr><td>Event retention</td><td>{{ request.app.state.config.event_retention_days }} days</td></tr>
+    <tr><td>Node offline threshold</td><td>{{ request.app.state.config.node_offline_after_seconds }} sec without heartbeat</td></tr>
+    <tr><td>Public URL</td><td>{{ request.app.state.config.public_url }}</td></tr>
+    <tr><td>Telegram bot</td><td>{{ 'enabled' if request.app.state.config.bot_token else 'disabled' }}</td></tr>
+  </tbody>
+</table>
+<p class="muted" style="margin-top:16px;">
+  Ignore/allow/watch-листы, дополнительные источники обнаружения и Prometheus-метрики появятся в следующем этапе.
+</p>
+{% endblock %}

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Вход — Domain Monitor</title>
+  <link rel="stylesheet" href="/admin/static/style.css">
+</head>
+<body>
+  <div class="login-wrap">
+    <div class="login-box">
+      <h1>🖥 Domain Monitor</h1>
+      {% if error %}<div class="error">{{ error }}</div>{% endif %}
+      <form method="post" action="/admin/login">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="form-row">
+          <label>Логин</label>
+          <input type="text" name="username" autofocus required style="width:100%">
+        </div>
+        <div class="form-row">
+          <label>Пароль</label>
+          <input type="password" name="password" required style="width:100%">
+        </div>
+        <button class="btn" type="submit" style="width:100%">Войти</button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>

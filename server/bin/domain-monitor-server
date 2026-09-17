@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Domain Monitor Server CLI.
+#
+#   domain-monitor-server            interactive management menu
+#   domain-monitor-server status     container + health status
+#   domain-monitor-server start      start the service
+#   domain-monitor-server stop       stop the service
+#   domain-monitor-server restart    restart the service
+#   domain-monitor-server logs       follow logs
+#   domain-monitor-server update     pull latest code, rebuild, restart
+#   domain-monitor-server uninstall  remove container/image/data (with confirmation)
+#   domain-monitor-server doctor     run diagnostics
+#   domain-monitor-server backup     back up database + config to ./backups
+#   domain-monitor-server restore <f> restore from a backup file
+set -uo pipefail
+
+# Resolve through the /usr/local/bin symlink the installer creates - a
+# plain `dirname "${BASH_SOURCE[0]}"` would resolve to /usr/local/bin
+# itself when invoked as `domain-monitor-server`, not the project dir.
+PROJECT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+SCRIPTS_DIR="$PROJECT_DIR/scripts"
+
+# shellcheck source=../scripts/lib.sh
+source "$SCRIPTS_DIR/lib.sh"
+
+cmd="${1:-menu}"
+
+case "$cmd" in
+    menu)      exec bash "$SCRIPTS_DIR/menu.sh" ;;
+    status)    bash "$SCRIPTS_DIR/healthcheck.sh" ;;
+    start)     cd "$PROJECT_DIR" && compose up -d ;;
+    stop)      cd "$PROJECT_DIR" && compose stop ;;
+    restart)   cd "$PROJECT_DIR" && compose restart ;;
+    logs)      cd "$PROJECT_DIR" && compose logs --tail 100 -f ;;
+    update)    exec bash "$SCRIPTS_DIR/update.sh" ;;
+    uninstall) exec bash "$SCRIPTS_DIR/uninstall.sh" ;;
+    doctor)    bash "$SCRIPTS_DIR/doctor.sh" ;;
+    backup)    bash "$SCRIPTS_DIR/backup.sh" ;;
+    restore)   bash "$SCRIPTS_DIR/restore.sh" "${2:-}" ;;
+    -h|--help|help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' ;;
+    *)
+        echo "Unknown command: $cmd" >&2
+        echo "Run 'domain-monitor-server help' for usage." >&2
+        exit 1
+        ;;
+esac
