@@ -163,7 +163,8 @@ print_menu_box() {
     box_line "4) Статус       - что установлено и работает" "${C_NUM}4)${C_RESET} Статус       - что установлено и работает"
     box_line "5) Диагностика  - проверить установленные компоненты" "${C_NUM}5)${C_RESET} Диагностика  - проверить установленные компоненты"
     box_line "6) Управление скриптом  - переустановка, обновление" "${C_NUM}6)${C_RESET} Управление скриптом  - переустановка, обновление"
-    box_line "7) Выход" "${C_NUM}7)${C_RESET} Выход"
+    box_empty
+    box_line "0) Выход" "${C_NUM}0)${C_RESET} Выход"
     box_bottom
 }
 
@@ -199,7 +200,7 @@ show_menu() {
     print_menu_box
     echo
     local choice
-    read -r -p "$(printf "${C_LABEL}Выбери действие${C_RESET} ${C_OFF}[1-7]${C_RESET}: ")" choice </dev/tty
+    read -r -p "$(printf "${C_LABEL}Выбери действие${C_RESET} ${C_OFF}[0-6]${C_RESET}: ")" choice </dev/tty
     case "$choice" in
         1) install_both ;;
         2) exec bash "$PROJECT_DIR/agent/install-agent.sh" ;;
@@ -207,7 +208,7 @@ show_menu() {
         4) show_status; show_menu ;;
         5) run_doctor; show_menu ;;
         6) script_management_menu; show_menu ;;
-        7) exit 0 ;;
+        0) exit 0 ;;
         *) echo "Неверный выбор."; sleep 1; show_menu ;;
     esac
 }
@@ -491,7 +492,8 @@ print_script_menu_box() {
     box_line "2) Удалить           - снести всё, что тут стоит" "${C_NUM}2)${C_RESET} Удалить           - снести всё, что тут стоит"
     box_line "3) Обновить          - git pull + пересборка компонентов" "${C_NUM}3)${C_RESET} Обновить          - git pull + пересборка компонентов"
     box_line "4) Автообновление ($au_status)" "${C_NUM}4)${C_RESET} Автообновление (${au_label})"
-    box_line "5) Назад" "${C_NUM}5)${C_RESET} Назад"
+    box_empty
+    box_line "0) Назад" "${C_NUM}0)${C_RESET} Назад"
     box_bottom
 }
 
@@ -508,13 +510,13 @@ script_management_menu() {
         print_script_menu_box "$au_status"
         echo
         local choice
-        read -r -p "$(printf "${C_LABEL}Выбор${C_RESET} ${C_OFF}[1-5]${C_RESET}: ")" choice </dev/tty
+        read -r -p "$(printf "${C_LABEL}Выбор${C_RESET} ${C_OFF}[0-4]${C_RESET}: ")" choice </dev/tty
         case "$choice" in
             1) reinstall_all; return ;;
             2) uninstall_all; exit 0 ;;
             3) update_all; read -r -p "Enter - назад в меню" _ </dev/tty ;;
             4) toggle_auto_update; read -r -p "Enter - назад в меню" _ </dev/tty ;;
-            5) return ;;
+            0) return ;;
             *) echo "Неверный выбор."; sleep 1 ;;
         esac
     done
