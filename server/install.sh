@@ -51,10 +51,15 @@ run_wizard() {
     local admin_key public_url port bot_token admin_id telegram_proxy
 
     admin_key="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))' 2>/dev/null || head -c32 /dev/urandom | base64 | tr -d '/+=' | head -c43)"
-    public_url="http://$(curl -s -4 -m 3 ifconfig.me 2>/dev/null || hostname)"
     port="$(find_free_port 8280)"
+    public_url="http://$(curl -s -4 -m 3 ifconfig.me 2>/dev/null || hostname)"
+    # PUBLIC_URL is what every agent's SERVER_URL gets set to - without
+    # the port baked in, agents would connect to the address's default
+    # port (80) instead of wherever uvicorn actually listens, and every
+    # heartbeat/event would silently go nowhere.
+    [ "$port" != "80" ] && public_url="${public_url}:${port}"
 
-    echo "Адрес: $public_url   Порт: $port   (поменять можно потом в .env)"
+    echo "Адрес: $public_url   (поменять можно потом в .env)"
     echo
 
     while true; do

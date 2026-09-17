@@ -64,6 +64,30 @@ else
     fail "HTTP /healthz не отвечает на порту $PORT" "Контейнер может ещё стартовать, либо порт заблокирован."
 fi
 
+# PUBLIC_URL - this is what gets baked into every agent's SERVER_URL, so a
+# missing/wrong port here means every remote node silently fails to
+# report in, with no error visible on the server side at all.
+PUBLIC_URL="$(grep -oP '^PUBLIC_URL=\K.*' "$ENV_FILE" 2>/dev/null || true)"
+if [ -z "$PUBLIC_URL" ]; then
+    fail "PUBLIC_URL не задан в .env" "Без него добавление ноды выдаст неполный адрес. Задай вручную: PUBLIC_URL=http://<адрес>:${PORT}"
+elif [ "$PORT" != "80" ] && [[ "$PUBLIC_URL" != *":$PORT" ]]; then
+    fail "PUBLIC_URL не содержит порт ($PUBLIC_URL, PORT=$PORT)" \
+        "Новые ноды будут стучаться не туда. Исправь: PUBLIC_URL=${PUBLIC_URL}:${PORT} в .env, затем domain-monitor-server restart"
+else
+    ok "PUBLIC_URL содержит правильный порт ($PUBLIC_URL)"
+fi
+
+# Firewall - a locally-passing healthcheck says nothing about whether a
+# remote node can actually reach this port from outside.
+if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "^Status: active"; then
+    if ufw status 2>/dev/null | grep -qE "^${PORT}([/ ]|$)"; then
+        ok "UFW разрешает входящие на порту $PORT"
+    else
+        fail "UFW активен, но не разрешает входящие на порту $PORT" \
+            "Внешние ноды не смогут достучаться до сервера. Открой порт: ufw allow ${PORT}/tcp"
+    fi
+fi
+
 # Database
 DB_FILE="$PROJECT_DIR/data/domain_monitor.db"
 if [ -f "$DB_FILE" ]; then
