@@ -30,27 +30,6 @@ install_docker_if_missing() {
     curl -fsSL https://get.docker.com | sh
 }
 
-# Opens the API port in UFW if UFW is the thing actually active on this
-# box - a node can't reach a port that never got heartbeats/events from
-# them for reasons invisible on the server side. Anything else (firewalld,
-# a cloud provider's security group, iptables managed by hand) is left
-# alone: this only touches what it can safely identify and reverse.
-open_firewall_port() {
-    local port="$1"
-    if ! command -v ufw >/dev/null 2>&1; then
-        return
-    fi
-    if ! ufw status 2>/dev/null | grep -q "^Status: active"; then
-        return
-    fi
-    if ufw status 2>/dev/null | grep -qE "^${port}([/ ]|$)"; then
-        echo "[*] UFW уже разрешает порт ${port}."
-        return
-    fi
-    ufw allow "${port}/tcp" >/dev/null 2>&1
-    echo "[*] UFW активен - открыл порт ${port}/tcp для входящих (иначе внешние ноды не достучатся)."
-}
-
 prompt() {
     local __resultvar="$1" __message="$2" __default="${3:-}"
     local __input

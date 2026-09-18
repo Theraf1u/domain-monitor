@@ -6,6 +6,10 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLI_TARGET="/usr/local/bin/domain-monitor-server"
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
+# Read before anything below can remove .env, so the port to close is
+# still known even if the admin chooses to wipe the whole project dir.
+PORT="$(grep -oP '^PORT=\K.*' "$PROJECT_DIR/.env" 2>/dev/null || echo '')"
+
 if [ "$(id -u)" -ne 0 ]; then
     echo "Этот скрипт нужно запускать от root (используй sudo)." >&2
     exit 1
@@ -20,6 +24,7 @@ if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
 fi
 
 (cd "$PROJECT_DIR" && compose down --rmi local 2>/dev/null) || true
+close_firewall_port "$PORT"
 
 if [ -f "$CLI_TARGET" ]; then
     rm -f "$CLI_TARGET"

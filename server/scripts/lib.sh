@@ -63,3 +63,44 @@ compose_build_quiet() {
     rm -f "$logfile"
     return "$status"
 }
+
+# Opens the API port in UFW if UFW is the thing actually active on this
+# box - a node can't reach a port that never got heartbeats/events from
+# them for reasons invisible on the server side. Anything else (firewalld,
+# a cloud provider's security group, iptables managed by hand) is left
+# alone: this only touches what it can safely identify and reverse.
+open_firewall_port() {
+    local port="$1"
+    if ! command -v ufw >/dev/null 2>&1; then
+        return
+    fi
+    if ! ufw status 2>/dev/null | grep -q "^Status: active"; then
+        return
+    fi
+    if ufw status 2>/dev/null | grep -qE "^${port}([/ ]|$)"; then
+        echo "[*] UFW уже разрешает порт ${port}."
+        return
+    fi
+    ufw allow "${port}/tcp" >/dev/null 2>&1
+    echo "[*] UFW активен - открыл порт ${port}/tcp для входящих (иначе внешние ноды не достучатся)."
+}
+
+# Mirror of open_firewall_port() for uninstall - only closes a rule that
+# looks like the one install.sh itself would have added (a bare
+# "<port>/tcp ALLOW Anywhere" rule, no extra restriction), so it never
+# removes something the admin added by hand for a different reason.
+close_firewall_port() {
+    local port="$1"
+    [ -z "$port" ] && return
+    if ! command -v ufw >/dev/null 2>&1; then
+        return
+    fi
+    if ! ufw status 2>/dev/null | grep -q "^Status: active"; then
+        return
+    fi
+    if ! ufw status 2>/dev/null | grep -qE "^${port}/tcp[[:space:]]+ALLOW[[:space:]]+Anywhere[[:space:]]*$"; then
+        return
+    fi
+    ufw delete allow "${port}/tcp" >/dev/null 2>&1
+    echo "[*] UFW: закрыл порт ${port}/tcp, который открывал установщик."
+}

@@ -319,6 +319,10 @@ _do_uninstall() {
                 # shellcheck source=./server/scripts/lib.sh
                 source "scripts/lib.sh" 2>/dev/null
                 compose down --rmi local 2>/dev/null
+                if [ "$component" = "server" ]; then
+                    port="$(grep -oP '^PORT=\K.*' .env 2>/dev/null || echo '')"
+                    close_firewall_port "$port"
+                fi
             ) || true
         fi
     done
