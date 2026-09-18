@@ -493,12 +493,19 @@ async def cb_node_card(call: CallbackQuery, db: Database, config: Config) -> Non
 
     sources_line = ""
     if node.capture_tls_running is not None or node.capture_dns_running is not None:
+        # A source this agent was never asked to enable (known via
+        # sources_enabled, spec 10) isn't a problem - omit it rather than
+        # showing 🔴 for something that was never supposed to be running.
+        # Falls back to always showing both when sources_enabled is
+        # unknown (pre-upgrade agent), matching the old behavior exactly.
+        enabled = set(node.sources_enabled) if node.sources_enabled is not None else None
         parts = []
-        if node.capture_tls_running is not None:
+        if node.capture_tls_running is not None and (enabled is None or "tls_sni" in enabled):
             parts.append(f"TLS SNI {'🟢' if node.capture_tls_running else '🔴'}")
-        if node.capture_dns_running is not None:
+        if node.capture_dns_running is not None and (enabled is None or "dns" in enabled):
             parts.append(f"DNS {'🟢' if node.capture_dns_running else '🔴'}")
-        sources_line = f"Источники: {', '.join(parts)}\n"
+        if parts:
+            sources_line = f"Источники: {', '.join(parts)}\n"
 
     error_line = ""
     if node.last_send_error:
@@ -567,14 +574,30 @@ def _build_node_check_text(node, db: Database, config: Config) -> str:
         lines.append(f"Отправка: на паузе ({why}) - 503 ниже ожидаем")
 
     if node.capture_tls_running is not None or node.capture_dns_running is not None:
-        cap_bits = []
+        # A source outside sources_enabled was never supposed to be
+        # running - report it separately from an actual malfunction
+        # (unknown sources_enabled, i.e. a pre-upgrade agent, keeps the
+        # old "any source not running is worth flagging" behavior).
+        enabled = set(node.sources_enabled) if node.sources_enabled is not None else None
+        cap_bits, not_enabled_bits = [], []
         if node.capture_tls_running is not None:
-            cap_bits.append(f"TLS SNI {'работает' if node.capture_tls_running else 'НЕ работает'}")
-            if effective_monitoring and not node.capture_tls_running:
-                issues.append("мониторинг включён, но capture TLS SNI не запущен на агенте")
+            if enabled is not None and "tls_sni" not in enabled:
+                not_enabled_bits.append("TLS SNI")
+            else:
+                cap_bits.append(f"TLS SNI {'работает' if node.capture_tls_running else 'НЕ работает'}")
+                if effective_monitoring and not node.capture_tls_running:
+                    issues.append("мониторинг включён, но capture TLS SNI не запущен на агенте")
         if node.capture_dns_running is not None:
-            cap_bits.append(f"DNS {'работает' if node.capture_dns_running else 'НЕ работает'}")
-        lines.append("Capture: " + ", ".join(cap_bits))
+            if enabled is not None and "dns" not in enabled:
+                not_enabled_bits.append("DNS")
+            else:
+                cap_bits.append(f"DNS {'работает' if node.capture_dns_running else 'НЕ работает'}")
+                if effective_monitoring and not node.capture_dns_running:
+                    issues.append("мониторинг включён, но capture DNS не запущен на агенте")
+        if cap_bits:
+            lines.append("Capture: " + ", ".join(cap_bits))
+        if not_enabled_bits:
+            lines.append(f"Не включено на этой ноде: {', '.join(not_enabled_bits)}")
     else:
         lines.append("Capture: неизвестно (агент не сообщает - обновите agent)")
 

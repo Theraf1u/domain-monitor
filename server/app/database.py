@@ -9,6 +9,7 @@ against genuinely concurrent requests, not a single-threaded event loop.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -226,11 +227,14 @@ class Database:
         buffer_limit_bytes: int | None = None, dropped_events_total: int | None = None,
         capture_tls_running: bool | None = None, capture_dns_running: bool | None = None,
         last_send_error: str | None = None, last_send_success_at: datetime | None = None,
+        sources_supported: list[str] | None = None, sources_enabled: list[str] | None = None,
     ) -> None:
         with self._lock:
             now = _now()
             if version is not None or ip is not None or hostname is not None or buffer_size is not None:
                 success_str = _fmt_ts(last_send_success_at) if last_send_success_at else None
+                supported_json = json.dumps(sources_supported) if sources_supported is not None else None
+                enabled_json = json.dumps(sources_enabled) if sources_enabled is not None else None
                 self._conn.execute(
                     "UPDATE nodes SET last_heartbeat_at = ?, last_seen_at = ?, "
                     "version = COALESCE(?, version), ip = COALESCE(?, ip), "
@@ -246,7 +250,7 @@ class Database:
                     # ("unknown"), not a regression.
                     "agent_uptime_seconds = ?, buffer_bytes = ?, buffer_limit_bytes = ?, "
                     "dropped_events_total = ?, capture_tls_running = ?, capture_dns_running = ?, "
-                    "last_send_error = ?, "
+                    "last_send_error = ?, sources_supported = ?, sources_enabled = ?, "
                     # ...except this one, which should only ever move
                     # forward - a heartbeat with no fresh success shouldn't
                     # erase the last time one actually happened.
@@ -257,7 +261,7 @@ class Database:
                         agent_uptime_seconds, buffer_bytes, buffer_limit_bytes, dropped_events_total,
                         None if capture_tls_running is None else int(capture_tls_running),
                         None if capture_dns_running is None else int(capture_dns_running),
-                        last_send_error, success_str, node_id,
+                        last_send_error, supported_json, enabled_json, success_str, node_id,
                     ),
                 )
             else:
@@ -315,6 +319,8 @@ class Database:
             last_send_error=row["last_send_error"],
             last_send_success_at=_parse_ts(row["last_send_success_at"]),
             buffer_alert_level=row["buffer_alert_level"],
+            sources_supported=json.loads(row["sources_supported"]) if row["sources_supported"] else None,
+            sources_enabled=json.loads(row["sources_enabled"]) if row["sources_enabled"] else None,
         )
 
     # ------------------------------------------------------------------

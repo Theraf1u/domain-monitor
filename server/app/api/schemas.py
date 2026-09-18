@@ -92,6 +92,8 @@ class HeartbeatRequest(BaseModel):
     capture_dns_running: bool | None = None
     last_send_error: str | None = None
     last_send_success_at: datetime | None = None
+    sources_supported: list[str] | None = None
+    sources_enabled: list[str] | None = None
 
 
 class HeartbeatResponse(BaseModel):

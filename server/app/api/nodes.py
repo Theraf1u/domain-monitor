@@ -108,6 +108,7 @@ def heartbeat(
         buffer_limit_bytes=body.buffer_limit_bytes, dropped_events_total=body.dropped_events_total,
         capture_tls_running=body.capture_tls_running, capture_dns_running=body.capture_dns_running,
         last_send_error=body.last_send_error, last_send_success_at=body.last_send_success_at,
+        sources_supported=body.sources_supported, sources_enabled=body.sources_enabled,
     )
     return HeartbeatResponse(
         monitoring_enabled=node.monitoring_enabled and fleet_control.is_monitoring_enabled(db),

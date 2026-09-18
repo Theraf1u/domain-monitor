@@ -16,7 +16,7 @@ import httpx
 from app.buffer import Buffer
 from app.config import Config
 from app.remote_control import RemoteControl
-from app.sniffer import Sniffer
+from app.sniffer import Sniffer, sources_supported
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +140,8 @@ class UplinkTask:
                 payload["capture_tls_running"] = status["tls_sni"]
             if "dns" in status:
                 payload["capture_dns_running"] = status["dns"]
+            payload["sources_supported"] = sources_supported()
+            payload["sources_enabled"] = self.sniffer.sources_enabled()
         try:
             resp = await self._client.post("/api/v1/nodes/heartbeat", json=payload)
             resp.raise_for_status()

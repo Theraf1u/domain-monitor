@@ -253,3 +253,16 @@ class Sniffer:
         just doesn't appear, rather than reporting a fake False for a
         capability this agent was never asked to provide."""
         return {w.spec.name: w.is_capturing for w in self._workers}
+
+    def sources_enabled(self) -> list[str]:
+        """Which sources this agent was actually started with (spec 10's
+        "sources_enabled") - a subset of sources_supported()."""
+        return [w.spec.name for w in self._workers]
+
+
+def sources_supported() -> list[str]:
+    """Every source with a real implementation (spec 10's
+    "sources_supported") - module-level and independent of any running
+    Sniffer instance, since this reports what the agent *build* is
+    capable of, not what a particular run was configured to enable."""
+    return list(_AVAILABLE_SOURCES)
