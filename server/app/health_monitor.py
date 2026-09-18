@@ -60,6 +60,9 @@ class NodeHealthMonitor:
             if online == node.last_known_online:
                 continue
             await asyncio.to_thread(self.db.set_node_last_known_online, node.id, online)
+            await asyncio.to_thread(
+                self.db.record_node_health_event, node.id, "recovered" if online else "offline", now,
+            )
             if online:
                 await self.notifier.notify_recovered(node)
             else:

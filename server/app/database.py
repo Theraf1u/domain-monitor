@@ -556,22 +556,94 @@ class Database:
             hits=row["hits"],
         )
 
-    def count_events_since(self, since: datetime, until: datetime | None = None) -> int:
+    def count_events_since(
+        self, since: datetime, until: datetime | None = None, node_id: int | None = None,
+    ) -> int:
         clauses = ["occurred_at >= ?"]
         params: list[object] = [_fmt_ts(since)]
         if until is not None:
             clauses.append("occurred_at < ?")
             params.append(_fmt_ts(until))
+        if node_id is not None:
+            clauses.append("node_id = ?")
+            params.append(node_id)
         with self._lock:
             cur = self._conn.execute(
                 f"SELECT COALESCE(SUM(hits), 0) FROM events WHERE {' AND '.join(clauses)}", params
             )
             return cur.fetchone()[0]
 
+    def source_distribution_since(
+        self, since: datetime, until: datetime | None = None, node_id: int | None = None,
+    ) -> list[tuple[str, int]]:
+        clauses = ["occurred_at >= ?"]
+        params: list[object] = [_fmt_ts(since)]
+        if until is not None:
+            clauses.append("occurred_at < ?")
+            params.append(_fmt_ts(until))
+        if node_id is not None:
+            clauses.append("node_id = ?")
+            params.append(node_id)
+        with self._lock:
+            cur = self._conn.execute(
+                f"SELECT source, SUM(hits) as c FROM events WHERE {' AND '.join(clauses)} "
+                f"GROUP BY source ORDER BY c DESC",
+                params,
+            )
+            return [(r["source"], r["c"]) for r in cur.fetchall()]
+
+    def record_node_health_event(self, node_id: int, event_type: str, when: datetime) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO node_health_events (node_id, event_type, occurred_at) VALUES (?, ?, ?)",
+                (node_id, event_type, _fmt_ts(when)),
+            )
+            self._conn.commit()
+
+    def count_offline_incidents(
+        self, since: datetime | None = None, until: datetime | None = None, node_id: int | None = None,
+    ) -> int:
+        clauses = ["event_type = 'offline'"]
+        params: list[object] = []
+        if since is not None:
+            clauses.append("occurred_at >= ?")
+            params.append(_fmt_ts(since))
+        if until is not None:
+            clauses.append("occurred_at < ?")
+            params.append(_fmt_ts(until))
+        if node_id is not None:
+            clauses.append("node_id = ?")
+            params.append(node_id)
+        with self._lock:
+            cur = self._conn.execute(f"SELECT COUNT(*) FROM node_health_events WHERE {' AND '.join(clauses)}", params)
+            return cur.fetchone()[0]
+
     def top_domains(self, limit: int = 10) -> list[Domain]:
         with self._lock:
             cur = self._conn.execute("SELECT * FROM domains ORDER BY hits DESC LIMIT ?", (limit,))
             return [self._row_to_domain(r) for r in cur.fetchall()]
+
+    def top_domains_since(
+        self, since: datetime, until: datetime | None = None, node_id: int | None = None, limit: int = 5,
+    ) -> list[tuple[str, int]]:
+        """Top domains by hits WITHIN a window, from events - domains.hits
+        is a lifetime counter, so it can't answer "top domains this week"
+        on its own (top_domains() above is the all-time version)."""
+        clauses = ["occurred_at >= ?"]
+        params: list[object] = [_fmt_ts(since)]
+        if until is not None:
+            clauses.append("occurred_at < ?")
+            params.append(_fmt_ts(until))
+        if node_id is not None:
+            clauses.append("node_id = ?")
+            params.append(node_id)
+        with self._lock:
+            cur = self._conn.execute(
+                f"SELECT domain, SUM(hits) as c FROM events WHERE {' AND '.join(clauses)} "
+                f"GROUP BY domain ORDER BY c DESC LIMIT ?",
+                (*params, limit),
+            )
+            return [(r["domain"], r["c"]) for r in cur.fetchall()]
 
     def top_active_nodes_since(self, since: datetime, limit: int = 3) -> list[tuple[str, int]]:
         """(node name, event count) for the most active nodes in a window -
