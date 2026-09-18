@@ -47,6 +47,7 @@ class NodeResponse(BaseModel):
     last_heartbeat_at: datetime | None
     monitoring_enabled: bool
     notifications_enabled: bool
+    sending_enabled: bool
 
     @staticmethod
     def from_node(node: Node, offline_after_seconds: int) -> "NodeResponse":
@@ -64,12 +65,14 @@ class NodeResponse(BaseModel):
             last_heartbeat_at=node.last_heartbeat_at,
             monitoring_enabled=node.monitoring_enabled,
             notifications_enabled=node.notifications_enabled,
+            sending_enabled=node.sending_enabled,
         )
 
 
 class NodeSettingsUpdateRequest(BaseModel):
     monitoring_enabled: bool | None = None
     notifications_enabled: bool | None = None
+    sending_enabled: bool | None = None
 
 
 class HeartbeatRequest(BaseModel):

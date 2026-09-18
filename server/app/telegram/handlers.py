@@ -195,6 +195,15 @@ async def cb_node_toggle_mon(call: CallbackQuery, db: Database, config: Config) 
     await cb_node_card(call, db, config)
 
 
+@router.callback_query(F.data.startswith("node_toggle_sending:"))
+async def cb_node_toggle_sending(call: CallbackQuery, db: Database, config: Config) -> None:
+    node_id = int(call.data.split(":")[1])
+    node = db.get_node(node_id)
+    if node:
+        db.set_node_sending(node_id, not node.sending_enabled)
+    await cb_node_card(call, db, config)
+
+
 @router.callback_query(F.data.startswith("node_toggle_notif:"))
 async def cb_node_toggle_notif(call: CallbackQuery, db: Database, config: Config) -> None:
     node_id = int(call.data.split(":")[1])

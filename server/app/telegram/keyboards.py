@@ -130,8 +130,12 @@ NOTIFY_DEST_LABELS = {
 def node_card(node: Node) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     mon_label = _toggle_label("Мониторинг включён", "Мониторинг выключен", node.monitoring_enabled)
+    sending_label = _toggle_label("Отправка включена", "Отправка выключена", node.sending_enabled)
     notif_label = _toggle_label("Уведомления включены", "Уведомления выключены", node.notifications_enabled)
     b.button(text=mon_label, callback_data=f"node_toggle_mon:{node.id}", style=_toggle_style(node.monitoring_enabled))
+    b.button(
+        text=sending_label, callback_data=f"node_toggle_sending:{node.id}", style=_toggle_style(node.sending_enabled),
+    )
     b.button(
         text=notif_label, callback_data=f"node_toggle_notif:{node.id}", style=_toggle_style(node.notifications_enabled),
     )

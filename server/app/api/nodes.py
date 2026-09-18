@@ -61,6 +61,8 @@ def update_node_settings(
         db.set_node_monitoring(node_id, body.monitoring_enabled)
     if body.notifications_enabled is not None:
         db.set_node_notifications(node_id, body.notifications_enabled)
+    if body.sending_enabled is not None:
+        db.set_node_sending(node_id, body.sending_enabled)
     return NodeResponse.from_node(db.get_node(node_id), runtime_settings.get_node_offline_after_seconds(db, config))
 
 
@@ -105,5 +107,5 @@ def heartbeat(
     )
     return HeartbeatResponse(
         monitoring_enabled=node.monitoring_enabled and fleet_control.is_monitoring_enabled(db),
-        sending_enabled=fleet_control.is_sending_enabled(db),
+        sending_enabled=node.sending_enabled and fleet_control.is_sending_enabled(db),
     )

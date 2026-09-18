@@ -185,6 +185,13 @@ class Database:
             )
             self._conn.commit()
 
+    def set_node_sending(self, node_id: int, enabled: bool) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE nodes SET sending_enabled = ? WHERE id = ?", (int(enabled), node_id)
+            )
+            self._conn.commit()
+
     def set_node_notify_destination(self, node_id: int, destination: str) -> None:
         with self._lock:
             self._conn.execute(
@@ -254,6 +261,7 @@ class Database:
             last_heartbeat_at=_parse_ts(row["last_heartbeat_at"]),
             monitoring_enabled=bool(row["monitoring_enabled"]),
             notifications_enabled=bool(row["notifications_enabled"]),
+            sending_enabled=bool(row["sending_enabled"]),
             notify_destination=row["notify_destination"],
             notify_group_chat_id=row["notify_group_chat_id"],
             notify_group_topic_id=row["notify_group_topic_id"],
