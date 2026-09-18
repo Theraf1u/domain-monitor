@@ -69,6 +69,8 @@ async def ingest_events(
             new_domains.append(domain_row.domain)
             NEW_DOMAINS_TOTAL.inc()
             verdict = classify_domain(domain_row.domain, rules)
+            if verdict.matched_rule_ids:
+                await asyncio.to_thread(db.record_filter_hits, verdict.matched_rule_ids, occurred_at)
             if verdict.is_watched:
                 WATCHLIST_HITS_TOTAL.inc()
                 await notifier.schedule_watchlist(node, domain_row.domain)

@@ -62,3 +62,7 @@ class FilterRule:
     pattern_type: str  # "exact" | "suffix" | "wildcard"
     pattern: str
     created_at: datetime
+    enabled: bool
+    comment: str | None
+    hits_count: int
+    last_hit_at: datetime | None

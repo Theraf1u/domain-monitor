@@ -55,12 +55,15 @@ def matches_pattern(domain: str, pattern: str, pattern_type: str) -> bool:
 
 
 class FilterVerdict:
-    __slots__ = ("is_ignored", "is_allowed", "is_watched")
+    __slots__ = ("is_ignored", "is_allowed", "is_watched", "matched_rule_ids")
 
-    def __init__(self, is_ignored: bool, is_allowed: bool, is_watched: bool) -> None:
+    def __init__(
+        self, is_ignored: bool, is_allowed: bool, is_watched: bool, matched_rule_ids: list[int] | None = None,
+    ) -> None:
         self.is_ignored = is_ignored
         self.is_allowed = is_allowed
         self.is_watched = is_watched
+        self.matched_rule_ids = matched_rule_ids or []
 
     @property
     def suppresses_notification(self) -> bool:
@@ -71,13 +74,17 @@ class FilterVerdict:
 
 def classify_domain(domain: str, rules: "list") -> FilterVerdict:
     is_ignored = is_allowed = is_watched = False
+    matched_rule_ids: list[int] = []
     for rule in rules:
+        if not rule.enabled:
+            continue
         if not matches_pattern(domain, rule.pattern, rule.pattern_type):
             continue
+        matched_rule_ids.append(rule.id)
         if rule.list_type == "ignore":
             is_ignored = True
         elif rule.list_type == "allow":
             is_allowed = True
         elif rule.list_type == "watch":
             is_watched = True
-    return FilterVerdict(is_ignored, is_allowed, is_watched)
+    return FilterVerdict(is_ignored, is_allowed, is_watched, matched_rule_ids)

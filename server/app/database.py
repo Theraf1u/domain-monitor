@@ -497,6 +497,36 @@ class Database:
             self._conn.commit()
             return cur.rowcount > 0
 
+    def set_filter_rule_enabled(self, rule_id: int, enabled: bool) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE filter_rules SET enabled = ? WHERE id = ?", (int(enabled), rule_id)
+            )
+            self._conn.commit()
+
+    def set_filter_rule_comment(self, rule_id: int, comment: str | None) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE filter_rules SET comment = ? WHERE id = ?", (comment, rule_id)
+            )
+            self._conn.commit()
+
+    def record_filter_hits(self, rule_ids: list[int], when: datetime) -> None:
+        """Bumps hits_count/last_hit_at for every rule that matched an
+        incoming domain - called once per ingested event with whichever
+        rule ids classify_domain() found, not one call per rule."""
+        if not rule_ids:
+            return
+        with self._lock:
+            when_str = _fmt_ts(when)
+            placeholders = ",".join("?" for _ in rule_ids)
+            self._conn.execute(
+                f"UPDATE filter_rules SET hits_count = hits_count + 1, last_hit_at = ? "
+                f"WHERE id IN ({placeholders})",
+                (when_str, *rule_ids),
+            )
+            self._conn.commit()
+
     def list_filter_rules(self, list_type: str | None = None) -> list[FilterRule]:
         with self._lock:
             if list_type:
@@ -518,6 +548,8 @@ class Database:
         return FilterRule(
             id=row["id"], list_type=row["list_type"], pattern_type=row["pattern_type"],
             pattern=row["pattern"], created_at=_parse_ts(row["created_at"]),
+            enabled=bool(row["enabled"]), comment=row["comment"],
+            hits_count=row["hits_count"], last_hit_at=_parse_ts(row["last_hit_at"]),
         )
 
     def close(self) -> None:
