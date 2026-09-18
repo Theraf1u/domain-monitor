@@ -47,10 +47,25 @@ class Database:
     def __init__(self, path: str) -> None:
         self.path = path
         self._lock = threading.Lock()
-        self._conn = sqlite3.connect(path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA foreign_keys = ON")
-        self._conn.execute("PRAGMA journal_mode = WAL")
+        self._conn = self._connect(path)
+
+    @staticmethod
+    def _connect(path: str) -> sqlite3.Connection:
+        conn = sqlite3.connect(path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode = WAL")
+        return conn
+
+    def reopen(self) -> None:
+        """Closes and re-establishes the connection to self.path - used
+        by restore (backup_task.py) after the on-disk file has been
+        swapped for a backup's copy, so every other part of the app that
+        holds this same Database instance transparently starts talking
+        to the restored data without needing to be handed a new object."""
+        with self._lock:
+            self._conn.close()
+            self._conn = self._connect(self.path)
 
     # ------------------------------------------------------------------
     # Schema / migrations

@@ -18,6 +18,7 @@ SETTING_DESTINATION = "backup_destination"  # "server" | "dm" | "group"
 SETTING_GROUP_CHAT_ID = "backup_group_chat_id"
 SETTING_GROUP_TOPIC_ID = "backup_group_topic_id"
 SETTING_LAST_RUN_AT = "backup_last_run_at"
+SETTING_KIND = "backup_kind"  # "db" | "full" - what the scheduled autobackup creates
 
 MIN_INTERVAL_HOURS = 1
 MAX_INTERVAL_HOURS = 24 * 30
@@ -103,3 +104,14 @@ def last_run_at(db: Database) -> str | None:
 
 def set_last_run_at(db: Database, iso_ts: str) -> None:
     db.set_setting(SETTING_LAST_RUN_AT, iso_ts)
+
+
+def kind(db: Database) -> str:
+    value = db.get_setting(SETTING_KIND, "db") or "db"
+    return value if value in ("db", "full") else "db"
+
+
+def set_kind(db: Database, value: str) -> None:
+    if value not in ("db", "full"):
+        raise ValueError(f"unknown backup kind: {value!r}")
+    db.set_setting(SETTING_KIND, value)
