@@ -2723,9 +2723,18 @@ async def cb_live_toggle(
 
 
 # ------------------------------------------------------------------
-# Fallback: any stray text/command outside an active FSM state just goes
-# back to the main menu (per the "no commands other than /start" rule).
+# Fallbacks - registered last, so they only catch what nothing above did.
 # ------------------------------------------------------------------
+
+@router.callback_query()
+async def callback_fallback(call: CallbackQuery) -> None:
+    """A button from a message sent before some callback_data format
+    changed (or a screen that's been removed entirely) must never just
+    throw - the tap gets an honest "this screen is stale" instead of the
+    eternal Telegram spinner or an unhandled-exception trip through
+    error_handler.py."""
+    await call.answer("⚠️ Этот экран устарел. Откройте меню заново.", show_alert=True)
+
 
 @router.message()
 async def fallback(message: Message, state: FSMContext, db: Database) -> None:

@@ -16,6 +16,7 @@ from app.database import Database
 from app.live_view import LiveViewManager
 from app.notifier import Notifier
 from app.telegram import handlers
+from app.telegram.error_handler import on_dispatcher_error
 from app.telegram.middleware import AdminOnlyMiddleware
 from app.topic_binding import TopicBindingManager
 
@@ -67,6 +68,7 @@ def build_bot_and_dispatcher(
     dp.callback_query.middleware(admin_only)
 
     dp.include_router(handlers.router)
+    dp.errors.register(on_dispatcher_error)
 
     dp["db"] = db
     dp["config"] = config
