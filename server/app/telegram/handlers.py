@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import os
+import socket
 from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot, F, Router
@@ -827,6 +828,8 @@ async def cb_settings(call: CallbackQuery, db: Database, config: Config, notifie
     offline_seconds = runtime_settings.get_node_offline_after_seconds(db, config)
     text = (
         "⚙️ <b>Настройки</b>\n\n"
+        f"🖥 Центр управления (этот бот): <code>{config.public_url}</code>\n"
+        f"Хост: <code>{socket.gethostname()}</code>\n\n"
         f"Хранение событий: {retention_days} дн. (0 — хранить всегда; не влияет на список доменов, "
         f"только на детальную историю)\n"
         f"Нода считается offline после: {offline_seconds} сек без heartbeat\n"
