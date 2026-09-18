@@ -7,6 +7,7 @@ from __future__ import annotations
 import csv
 import html
 import io
+import json
 import logging
 import os
 import socket
@@ -1439,6 +1440,69 @@ async def cb_filter_import_confirm(call: CallbackQuery, state: FSMContext, db: D
         f"✅ Импорт в {list_type} завершён.\nДобавлено: {added}\nПропущено (гонка/дубликат): {duplicates}",
         reply_markup=kb.back_button("filters"),
     )
+    await call.answer()
+
+
+@router.callback_query(F.data == "filter_export")
+async def cb_filter_export(call: CallbackQuery) -> None:
+    await call.message.edit_text("Что экспортировать?", reply_markup=kb.filter_export_scope())
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("filter_export_scope:"))
+async def cb_filter_export_scope(call: CallbackQuery) -> None:
+    scope = call.data.split(":", 1)[1]
+    await call.message.edit_text("В каком формате?", reply_markup=kb.filter_export_format(scope))
+    await call.answer()
+
+
+def _rules_for_export(db: Database, scope: str) -> list:
+    if scope == "all":
+        return [r for lt in ("watch", "ignore", "allow") for r in db.list_filter_rules(lt)]
+    return db.list_filter_rules(scope)
+
+
+def _render_filter_export_txt(rules: list) -> str:
+    return "\n".join(r.pattern for r in rules) + "\n"
+
+
+def _render_filter_export_csv(rules: list) -> str:
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["list_type", "pattern_type", "pattern", "enabled", "comment", "hits_count", "last_hit_at"])
+    for r in rules:
+        writer.writerow([
+            r.list_type, r.pattern_type, r.pattern, int(r.enabled), r.comment or "",
+            r.hits_count, r.last_hit_at.isoformat() if r.last_hit_at else "",
+        ])
+    return buf.getvalue()
+
+
+def _render_filter_export_json(rules: list) -> str:
+    return json.dumps(
+        [
+            {
+                "list_type": r.list_type, "pattern_type": r.pattern_type, "pattern": r.pattern,
+                "enabled": r.enabled, "comment": r.comment, "hits_count": r.hits_count,
+                "last_hit_at": r.last_hit_at.isoformat() if r.last_hit_at else None,
+            }
+            for r in rules
+        ],
+        ensure_ascii=False, indent=2,
+    )
+
+
+@router.callback_query(F.data.startswith("filter_export_fmt:"))
+async def cb_filter_export_fmt(call: CallbackQuery, db: Database) -> None:
+    _, scope, fmt = call.data.split(":")
+    rules = _rules_for_export(db, scope)
+    if not rules:
+        await call.answer("Список пуст - нечего экспортировать", show_alert=True)
+        return
+    renderers = {"txt": _render_filter_export_txt, "csv": _render_filter_export_csv, "json": _render_filter_export_json}
+    content = renderers[fmt](rules)
+    file = BufferedInputFile(content.encode("utf-8"), filename=f"filters_{scope}.{fmt}")
+    await call.message.answer_document(file, caption=f"Экспорт ({scope}): {len(rules)} правил(о)")
     await call.answer()
 
 

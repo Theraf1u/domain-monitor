@@ -385,8 +385,9 @@ def filters_menu(counts: dict[str, int]) -> InlineKeyboardMarkup:
     b.button(text="🔍 Проверить домен", callback_data="filter_check", style="primary")
     b.button(text="➕ Добавить правило", callback_data="filter_add", style="success")
     b.button(text="📥 Массовый импорт", callback_data="filter_import", style="primary")
+    b.button(text="📤 Экспорт", callback_data="filter_export", style="primary")
     b.button(text="⬅️ Назад", callback_data="main")
-    b.adjust(1, 1, 1, 1, 1, 1, 1)
+    b.adjust(1, 1, 1, 1, 1, 1, 1, 1)
     return b.as_markup()
 
 
@@ -477,6 +478,27 @@ def filter_import_pattern_type(list_type: str) -> InlineKeyboardMarkup:
 
 def confirm_filter_import() -> InlineKeyboardMarkup:
     return confirm_keyboard("✅ Да, импортировать", "filter_import_confirm", "filters")
+
+
+def filter_export_scope() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="🚨 Watch", callback_data="filter_export_scope:watch")
+    b.button(text="🚫 Ignore", callback_data="filter_export_scope:ignore")
+    b.button(text="✅ Allow", callback_data="filter_export_scope:allow")
+    b.button(text="📦 Всё сразу", callback_data="filter_export_scope:all")
+    b.button(text="❌ Отмена", callback_data="filters")
+    b.adjust(3, 1, 1)
+    return b.as_markup()
+
+
+def filter_export_format(scope: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="TXT", callback_data=f"filter_export_fmt:{scope}:txt")
+    b.button(text="CSV", callback_data=f"filter_export_fmt:{scope}:csv")
+    b.button(text="JSON", callback_data=f"filter_export_fmt:{scope}:json")
+    b.button(text="❌ Отмена", callback_data="filters")
+    b.adjust(3, 1)
+    return b.as_markup()
 
 
 def domain_notification(domain_id: int) -> InlineKeyboardMarkup:
