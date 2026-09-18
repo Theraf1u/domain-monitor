@@ -144,7 +144,8 @@ def nodes_list(
     b.button(text="🔎 Поиск", callback_data="nodes_search")
     filter_label = "⚙️ Фильтр: " + NODE_FILTER_LABELS.get(filter_key, filter_key)
     b.button(text=filter_label, callback_data="nodes_filter_menu")
-    rows = [1, 2]
+    b.button(text="🧰 Массовые действия", callback_data="nodes_bulk")
+    rows = [1, 2, 1]
     if has_search:
         b.button(text="✖️ Сбросить поиск", callback_data="nodes_search_clear")
         rows.append(1)
@@ -169,6 +170,43 @@ def nodes_list(
     rows.append(1)
     b.adjust(*rows)
     return b.as_markup()
+
+
+BULK_ACTION_LABELS = {
+    "mon_on": "▶️ Включить мониторинг",
+    "mon_off": "⏸ Выключить мониторинг",
+    "send_on": "📤 Включить отправку",
+    "send_off": "📤 Выключить отправку",
+    "notif_on": "🔔 Включить уведомления",
+    "notif_off": "🔕 Выключить уведомления",
+}
+
+
+def nodes_bulk_menu(nodes: list[Node], selected_ids: set[int]) -> InlineKeyboardMarkup:
+    """Telegram has no real checkboxes - a ✅/⬜ prefix on the button's
+    own text is the whole affordance. Selection itself lives in FSM
+    state (handlers._bulk_state), not encoded in callback_data."""
+    b = InlineKeyboardBuilder()
+    b.button(text="🟡 Устаревшие агенты", callback_data="nodes_bulk_select_outdated")
+    b.button(text="⚠️ Проблемные ноды", callback_data="nodes_bulk_select_problem")
+    b.button(text="☑️ Выбрать все", callback_data="nodes_bulk_select_all")
+    b.button(text="⬜ Снять выбор", callback_data="nodes_bulk_select_none")
+    rows = [2, 2]
+    for node in nodes:
+        prefix = "✅ " if node.id in selected_ids else "⬜ "
+        b.button(text=f"{prefix}{node.name}", callback_data=f"nodes_bulk_toggle:{node.id}")
+    rows.extend([1] * len(nodes))
+    for action, label in BULK_ACTION_LABELS.items():
+        b.button(text=label, callback_data=f"nodes_bulk_action:{action}", style="primary")
+    rows.extend([2, 2, 2])
+    b.button(text="⬅️ Назад", callback_data="nodes")
+    rows.append(1)
+    b.adjust(*rows)
+    return b.as_markup()
+
+
+def confirm_bulk_action(action: str, count: int) -> InlineKeyboardMarkup:
+    return confirm_keyboard(f"✅ Да, применить к {count} нод.", f"nodes_bulk_confirm:{action}", "nodes_bulk")
 
 
 def nodes_filter_menu(current: str) -> InlineKeyboardMarkup:

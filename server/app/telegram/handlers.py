@@ -299,6 +299,119 @@ async def cb_nodes_search_clear(call: CallbackQuery, state: FSMContext, db: Data
     await call.answer()
 
 
+# ------------------------------------------------------------------
+# Nodes - bulk actions
+# ------------------------------------------------------------------
+
+async def _bulk_selected(state: FSMContext) -> set[int]:
+    data = await state.get_data()
+    return set(data.get("bulk_selected", []))
+
+
+async def _set_bulk_selected(state: FSMContext, ids: set[int]) -> None:
+    await state.update_data(bulk_selected=sorted(ids))
+
+
+def _is_outdated(node) -> bool:
+    badge = version_badge(node.version)
+    return bool(badge and badge.startswith("🟡"))
+
+
+def _is_problem(node, online_ids: set[int]) -> bool:
+    return node.id not in online_ids or bool(node.last_send_error)
+
+
+async def _render_bulk_screen(call: CallbackQuery, state: FSMContext, db: Database, config: Config) -> None:
+    nodes = db.list_nodes()
+    selected = await _bulk_selected(state)
+    selected &= {n.id for n in nodes}  # drop ids of nodes deleted meanwhile
+    await _set_bulk_selected(state, selected)
+    text = (
+        "🧰 <b>Массовые действия с нодами</b>\n\n"
+        f"Выбрано: {len(selected)} из {len(nodes)}\n\n"
+        "Отметьте ноды ✅/⬜, затем выберите действие ниже - "
+        "перед применением будет запрошено подтверждение."
+    )
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=kb.nodes_bulk_menu(nodes, selected))
+    await call.answer()
+
+
+@router.callback_query(F.data == "nodes_bulk")
+async def cb_nodes_bulk(call: CallbackQuery, state: FSMContext, db: Database, config: Config) -> None:
+    await _render_bulk_screen(call, state, db, config)
+
+
+@router.callback_query(F.data.startswith("nodes_bulk_toggle:"))
+async def cb_nodes_bulk_toggle(call: CallbackQuery, state: FSMContext, db: Database, config: Config) -> None:
+    node_id = int(call.data.split(":")[1])
+    selected = await _bulk_selected(state)
+    selected.symmetric_difference_update({node_id})
+    await _set_bulk_selected(state, selected)
+    await _render_bulk_screen(call, state, db, config)
+
+
+@router.callback_query(F.data == "nodes_bulk_select_all")
+async def cb_nodes_bulk_select_all(call: CallbackQuery, state: FSMContext, db: Database, config: Config) -> None:
+    await _set_bulk_selected(state, {n.id for n in db.list_nodes()})
+    await _render_bulk_screen(call, state, db, config)
+
+
+@router.callback_query(F.data == "nodes_bulk_select_none")
+async def cb_nodes_bulk_select_none(call: CallbackQuery, state: FSMContext, db: Database, config: Config) -> None:
+    await _set_bulk_selected(state, set())
+    await _render_bulk_screen(call, state, db, config)
+
+
+@router.callback_query(F.data == "nodes_bulk_select_outdated")
+async def cb_nodes_bulk_select_outdated(call: CallbackQuery, state: FSMContext, db: Database, config: Config) -> None:
+    await _set_bulk_selected(state, {n.id for n in db.list_nodes() if _is_outdated(n)})
+    await _render_bulk_screen(call, state, db, config)
+
+
+@router.callback_query(F.data == "nodes_bulk_select_problem")
+async def cb_nodes_bulk_select_problem(call: CallbackQuery, state: FSMContext, db: Database, config: Config) -> None:
+    online_ids = _online_ids(db, config)
+    await _set_bulk_selected(state, {n.id for n in db.list_nodes() if _is_problem(n, online_ids)})
+    await _render_bulk_screen(call, state, db, config)
+
+
+@router.callback_query(F.data.startswith("nodes_bulk_action:"))
+async def cb_nodes_bulk_action_prompt(call: CallbackQuery, state: FSMContext, db: Database) -> None:
+    action = call.data.split(":")[1]
+    selected = await _bulk_selected(state)
+    if not selected:
+        await call.answer("Сначала отметьте хотя бы одну ноду.", show_alert=True)
+        return
+    label = kb.BULK_ACTION_LABELS.get(action, action)
+    await call.message.edit_text(
+        f"Применить «{label}» к {len(selected)} нод(ам)?",
+        reply_markup=kb.confirm_bulk_action(action, len(selected)),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("nodes_bulk_confirm:"))
+async def cb_nodes_bulk_confirm(call: CallbackQuery, state: FSMContext, db: Database, config: Config) -> None:
+    action = call.data.split(":")[1]
+    selected = await _bulk_selected(state)
+    setter, value = {
+        "mon_on": (db.set_node_monitoring, True),
+        "mon_off": (db.set_node_monitoring, False),
+        "send_on": (db.set_node_sending, True),
+        "send_off": (db.set_node_sending, False),
+        "notif_on": (db.set_node_notifications, True),
+        "notif_off": (db.set_node_notifications, False),
+    }.get(action, (None, None))
+    if setter is None:
+        await call.answer("Неизвестное действие", show_alert=True)
+        return
+    for node_id in selected:
+        setter(node_id, value)
+    await _set_bulk_selected(state, set())
+    await call.answer(f"Применено к {len(selected)} нод(ам)")
+    await _render_bulk_screen(call, state, db, config)
+
+
 @router.callback_query(F.data.startswith("node:"))
 async def cb_node_card(call: CallbackQuery, db: Database, config: Config) -> None:
     node_id = int(call.data.split(":")[1])
