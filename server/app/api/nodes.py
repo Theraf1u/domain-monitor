@@ -110,7 +110,12 @@ def heartbeat(
         last_send_error=body.last_send_error, last_send_success_at=body.last_send_success_at,
         sources_supported=body.sources_supported, sources_enabled=body.sources_enabled,
     )
+    active_job = db.active_migration_job()
+    migration_target_url = (
+        active_job["target_url"] if active_job and active_job["status"] == "cutover" else None
+    )
     return HeartbeatResponse(
         monitoring_enabled=node.monitoring_enabled and fleet_control.is_monitoring_enabled(db),
         sending_enabled=node.sending_enabled and fleet_control.is_sending_enabled(db),
+        migration_target_url=migration_target_url,
     )

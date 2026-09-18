@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 
 import httpx
 
+from app import runtime_config
 from app.buffer import Buffer
 from app.config import Config
 from app.remote_control import RemoteControl
@@ -43,8 +44,12 @@ class UplinkTask:
         self._start_time = time.monotonic()
         self._last_send_error: str | None = None
         self._last_send_success_at: str | None = None
+        # Picks up a persisted migration switchover from a previous run
+        # (spec 3.4) so a restarted agent resumes on the server it was
+        # last confirmed-migrated to, not the original .env SERVER_URL.
+        effective_url = runtime_config.effective_server_url(config.server_url, config.data_dir)
         self._client = httpx.AsyncClient(
-            base_url=config.server_url,
+            base_url=effective_url,
             headers={"Authorization": f"Bearer {config.node_token}"},
             timeout=config.http_timeout_seconds,
         )
@@ -145,21 +150,72 @@ class UplinkTask:
         try:
             resp = await self._client.post("/api/v1/nodes/heartbeat", json=payload)
             resp.raise_for_status()
-            self._apply_remote_control(resp)
+            migration_target = self._apply_remote_control(resp)
+            if migration_target:
+                # Deliberately awaited here, not fired-and-forgotten: the
+                # heartbeat loop's own backoff/retry naturally paces retries
+                # of a failed migration attempt, and only one migration
+                # attempt is ever in flight at a time.
+                await self._try_migrate(migration_target)
             return True
         except httpx.HTTPError as exc:
             logger.debug("Heartbeat failed: %s", exc)
             return False
 
-    def _apply_remote_control(self, resp: httpx.Response) -> None:
+    def _apply_remote_control(self, resp: httpx.Response) -> str | None:
+        """Returns a migration target URL to attempt switching to, or None.
+        Spec 3.3 step 1: receiving the field must NOT switch immediately -
+        it only returns the candidate for _try_migrate() to verify."""
         try:
             body = resp.json()
         except ValueError:
-            return  # older server without a heartbeat body - leave flags as they are
+            return None  # older server without a heartbeat body - leave flags as they are
         if "monitoring_enabled" in body:
             self.remote_control.monitoring_enabled = bool(body["monitoring_enabled"])
         if "sending_enabled" in body:
             self.remote_control.sending_enabled = bool(body["sending_enabled"])
+        target = body.get("migration_target_url")
+        if not target or not isinstance(target, str):
+            return None
+        target = target.rstrip("/")
+        current = str(self._client.base_url).rstrip("/")
+        return target if target and target != current else None
+
+    async def _try_migrate(self, target_url: str) -> None:
+        """Spec 3.3's exact switchover sequence: verify the target is alive,
+        verify it accepts THIS node's own token, only then persist+switch.
+        Any failure anywhere leaves the agent exactly on the current server
+        (base_url and the persisted override are both left untouched) -
+        the buffer/outbox is never touched by this method at all, so
+        events already captured are never at risk regardless of outcome."""
+        try:
+            async with httpx.AsyncClient(timeout=self.config.http_timeout_seconds) as probe:
+                health_resp = await probe.get(f"{target_url}/healthz")
+                health_resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            logger.warning("Migration target %s failed /healthz check (%s) - staying on current server", target_url, exc)
+            return
+
+        try:
+            async with httpx.AsyncClient(
+                base_url=target_url,
+                headers={"Authorization": f"Bearer {self.config.node_token}"},
+                timeout=self.config.http_timeout_seconds,
+            ) as probe:
+                confirm_resp = await probe.post(
+                    "/api/v1/nodes/heartbeat",
+                    json={"version": AGENT_VERSION, "hostname": socket.gethostname(), "buffer_size": self.buffer.size()},
+                )
+                confirm_resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            logger.warning("Migration target %s rejected this node's token (%s) - staying on current server", target_url, exc)
+            return
+
+        # Target is alive and accepted the token - persist the switchover
+        # (survives a restart) and switch the live client immediately.
+        runtime_config.set_override(self.config.data_dir, target_url)
+        self._client.base_url = target_url
+        logger.info("Migrated uplink to %s (confirmed via authenticated heartbeat)", target_url)
 
 
 def _best_effort_local_ip() -> str | None:

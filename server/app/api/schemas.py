@@ -102,6 +102,11 @@ class HeartbeatResponse(BaseModel):
     # agent doesn't need to know that distinction exists at all.
     monitoring_enabled: bool
     sending_enabled: bool
+    # Migration 2.0 (spec section 3.3): only present once a migration job
+    # has reached the 'cutover' stage - an old agent that doesn't know this
+    # key simply ignores it (see agent/app/uplink.py _apply_remote_control),
+    # so adding it here is safe for every agent version already deployed.
+    migration_target_url: str | None = None
 
 
 class EventIn(BaseModel):

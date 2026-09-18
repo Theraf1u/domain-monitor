@@ -24,6 +24,17 @@ fi
 OLD_URL="$(grep -oP '^SERVER_URL=\K.*' "$ENV_FILE" 2>/dev/null || echo "?")"
 sed -i "s|^SERVER_URL=.*|SERVER_URL=${NEW_URL}|" "$ENV_FILE"
 
+# A prior automated migration (spec 3.3) may have persisted a runtime
+# override in data/runtime.json that would otherwise take precedence over
+# the .env value just written above (see app/runtime_config.py -
+# effective_server_url() prefers the override). A manual set-server here
+# is an explicit admin decision and must always win, so clear it.
+RUNTIME_OVERRIDE="$PROJECT_DIR/data/runtime.json"
+if [ -f "$RUNTIME_OVERRIDE" ]; then
+    rm -f "$RUNTIME_OVERRIDE"
+    echo "[*] Снят предыдущий override миграции (data/runtime.json)."
+fi
+
 echo "SERVER_URL: ${OLD_URL} -> ${NEW_URL}"
 echo "[*] Перезапускаю агент ..."
 (cd "$PROJECT_DIR" && compose up -d)

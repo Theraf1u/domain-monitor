@@ -835,6 +835,48 @@ class Database:
             hits_count=row["hits_count"], last_hit_at=_parse_ts(row["last_hit_at"]),
         )
 
+    # ------------------------------------------------------------------
+    # Migration 2.0 (spec section 3) - one job row per `migrate-to` run.
+    # Only ever one "active" job at a time (enforced by the CLI/handlers
+    # that call these, not by a DB constraint - see migration 0014).
+    # ------------------------------------------------------------------
+
+    def create_migration_job(self, target_url: str) -> int:
+        with self._lock:
+            now = _now()
+            cur = self._conn.execute(
+                "INSERT INTO migration_jobs (target_url, status, created_at, updated_at) VALUES (?, 'pending', ?, ?)",
+                (target_url, now, now),
+            )
+            self._conn.commit()
+            return cur.lastrowid
+
+    def active_migration_job(self) -> dict | None:
+        """The most recent job that hasn't reached a terminal state - None
+        means no migration is in progress, which is the common case and
+        must stay cheap since the heartbeat endpoint checks it on every
+        single heartbeat from every node."""
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT * FROM migration_jobs WHERE status NOT IN ('completed', 'cancelled', 'failed') "
+                "ORDER BY id DESC LIMIT 1"
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def get_migration_job(self, job_id: int) -> dict | None:
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM migration_jobs WHERE id = ?", (job_id,)).fetchone()
+            return dict(row) if row else None
+
+    def set_migration_job_status(self, job_id: int, status: str, error: str | None = None) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE migration_jobs SET status = ?, error = ?, updated_at = ? WHERE id = ?",
+                (status, error, _now(), job_id),
+            )
+            self._conn.commit()
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()
