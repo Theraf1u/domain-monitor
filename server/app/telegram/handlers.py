@@ -24,6 +24,7 @@ from app.live_view import LiveViewManager
 from app.notifier import Notifier
 from app.security import generate_node_token, hash_token
 from app.telegram import keyboards as kb
+from app.telegram.formatters import format_bytes, format_relative_time
 from app.topic_binding import TopicBindingManager
 
 logger = logging.getLogger(__name__)
@@ -149,10 +150,7 @@ async def cb_node_card(call: CallbackQuery, db: Database, config: Config) -> Non
     offline_after = runtime_settings.get_node_offline_after_seconds(db, config)
     online = node.is_online(offline_after, now)
     status_line = "🟢 Online" if online else ("⛔ Отозвана" if node.status == "revoked" else "🔴 Offline")
-    hb_line = "никогда"
-    if node.last_heartbeat_at:
-        delta = int((now - node.last_heartbeat_at).total_seconds())
-        hb_line = f"{delta} сек назад"
+    hb_line = format_relative_time(node.last_heartbeat_at, now)
 
     domains = db.list_domains(limit=1000, node_id=node.id)
 
@@ -540,15 +538,6 @@ async def cb_data_reset_confirm(call: CallbackQuery, db: Database, config: Confi
 # Stats
 # ------------------------------------------------------------------
 
-def _format_size(num_bytes: int) -> str:
-    value = float(num_bytes)
-    for unit in ("Б", "КБ", "МБ", "ГБ"):
-        if value < 1024 or unit == "ГБ":
-            return f"{value:.1f} {unit}"
-        value /= 1024
-    return f"{value:.1f} ГБ"
-
-
 def _database_size_bytes(config: Config) -> int:
     base = config.database_path
     return sum(
@@ -582,7 +571,7 @@ def _stats_text(db: Database, config: Config, period: str) -> str:
     buffered_line = (
         f"В буферах агентов (собрано, не отправлено): {buffered_total}\n" if buffered_total else ""
     )
-    db_size_line = f"Размер базы доменов: {_format_size(_database_size_bytes(config))}\n"
+    db_size_line = f"Размер базы доменов: {format_bytes(_database_size_bytes(config))}\n"
 
     return (
         f"📊 <b>Статистика</b> ({period_label})\n\n"
