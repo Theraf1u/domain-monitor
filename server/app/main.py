@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
     db = Database(config.database_path)
     db.migrate()
 
-    notifier = Notifier(db, config.admin_ids)
+    notifier = Notifier(db, config.admin_ids, config)
     backup_task = BackupTask(db, config, notifier)
     topic_binding = TopicBindingManager()
     live_view = LiveViewManager()

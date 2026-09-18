@@ -12,9 +12,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, time as dt_time, timedelta, timezone
 
 from aiogram import Bot
 
+from app import runtime_settings
+from app.config import Config
 from app.database import Database
 from app.metrics import TELEGRAM_ERRORS_TOTAL
 from app.models import Node
@@ -26,11 +29,52 @@ SETTING_WATCHLIST_NOTIFICATIONS_ENABLED = "watchlist_notifications_enabled"
 SETTING_BATCH_MODE = "notify_batch_mode"
 _DEFAULT_BATCH_MODE = "instant"
 
+# Notification Center (spec 2.0 Part 1, section 8): every event type the bot
+# can notify about, whether it fires now or is wired up by a later feature
+# (buffer alerts/outdated-agent checks/a disk-space check/unified error
+# handling are separate roadmap items - their toggles exist here already so
+# Notification Center is one screen for all of them, but a toggle for a
+# monitor that doesn't exist yet is simply inert until that monitor ships).
+# `ignore_quiet_hours_default` matches spec 8.2's "watch/offline/recovery/
+# backup-failure всегда мимо батча" - the same set defaults to also bypass
+# quiet hours, since those are exactly the alerts an operator wants to see
+# regardless of the hour; the default is overridable per type.
+NOTIFY_TYPES: dict[str, dict] = {
+    "new_domain": {"label": "🌐 Новые домены", "ignore_quiet_hours_default": False},
+    "watch_hit": {"label": "🚨 Watch-хиты", "ignore_quiet_hours_default": True},
+    "node_offline": {"label": "🔴 Нода offline", "ignore_quiet_hours_default": True},
+    "node_recovered": {"label": "🟢 Нода восстановлена", "ignore_quiet_hours_default": True},
+    "agent_buffer_warning": {"label": "📦 Буфер: предупреждение", "ignore_quiet_hours_default": False},
+    "agent_buffer_critical": {"label": "📦 Буфер: критично", "ignore_quiet_hours_default": True},
+    "agent_outdated": {"label": "🟡 Устаревший агент", "ignore_quiet_hours_default": False},
+    "backup_failed": {"label": "💾 Ошибка бэкапа", "ignore_quiet_hours_default": True},
+    "backup_success": {"label": "💾 Бэкап успешен", "ignore_quiet_hours_default": False, "enabled_default": False},
+    "disk_space_warning": {"label": "💽 Мало места на диске", "ignore_quiet_hours_default": False},
+    "server_error": {"label": "⚠️ Ошибка сервера", "ignore_quiet_hours_default": True},
+}
+
+_SETTING_TYPE_ENABLED_PREFIX = "notify_type_enabled:"
+_SETTING_TYPE_IQH_PREFIX = "notify_type_iqh:"
+SETTING_QUIET_HOURS_ENABLED = "quiet_hours_enabled"
+SETTING_QUIET_HOURS_START = "quiet_hours_start"
+SETTING_QUIET_HOURS_END = "quiet_hours_end"
+_DEFAULT_QUIET_START = "23:00"
+_DEFAULT_QUIET_END = "08:00"
+
+SETTING_GLOBAL_DESTINATION = "notify_global_destination"
+_DEFAULT_GLOBAL_DESTINATION = "dm"
+
+
+def _parse_hhmm(value: str) -> dt_time:
+    hours, _, minutes = value.partition(":")
+    return dt_time(hour=int(hours), minute=int(minutes or 0))
+
 
 class Notifier:
-    def __init__(self, db: Database, admin_ids: list[int]) -> None:
+    def __init__(self, db: Database, admin_ids: list[int], config: Config | None = None) -> None:
         self.db = db
         self.admin_ids = admin_ids
+        self.config = config
         self.bot: Bot | None = None
         self._pending: list[tuple[Node, str]] = []
         self._lock = asyncio.Lock()
@@ -64,7 +108,7 @@ class Notifier:
         notifications silently."""
         if self.bot is None:
             return
-        dest = node.notify_destination
+        dest = self.global_destination() if node.notify_destination == "inherit" else node.notify_destination
         if dest in ("dm", "both") or (dest == "group" and node.notify_group_chat_id is None):
             await self.broadcast(text, parse_mode)
         if dest in ("group", "both") and node.notify_group_chat_id is not None:
@@ -98,8 +142,94 @@ class Notifier:
     def set_watchlist_enabled(self, enabled: bool) -> None:
         self.db.set_setting(SETTING_WATCHLIST_NOTIFICATIONS_ENABLED, "1" if enabled else "0")
 
+    # ------------------------------------------------------------------
+    # Notification Center (spec section 8)
+    # ------------------------------------------------------------------
+
+    def is_type_enabled(self, event_type: str) -> bool:
+        default = "1" if NOTIFY_TYPES.get(event_type, {}).get("enabled_default", True) else "0"
+        return self.db.get_setting(_SETTING_TYPE_ENABLED_PREFIX + event_type, default) == "1"
+
+    def set_type_enabled(self, event_type: str, enabled: bool) -> None:
+        self.db.set_setting(_SETTING_TYPE_ENABLED_PREFIX + event_type, "1" if enabled else "0")
+
+    def ignores_quiet_hours(self, event_type: str) -> bool:
+        raw = self.db.get_setting(_SETTING_TYPE_IQH_PREFIX + event_type)
+        if raw is not None:
+            return raw == "1"
+        return NOTIFY_TYPES.get(event_type, {}).get("ignore_quiet_hours_default", False)
+
+    def set_ignores_quiet_hours(self, event_type: str, value: bool) -> None:
+        self.db.set_setting(_SETTING_TYPE_IQH_PREFIX + event_type, "1" if value else "0")
+
+    def quiet_hours(self) -> tuple[bool, str, str]:
+        enabled = self.db.get_setting(SETTING_QUIET_HOURS_ENABLED, "0") == "1"
+        start = self.db.get_setting(SETTING_QUIET_HOURS_START, _DEFAULT_QUIET_START) or _DEFAULT_QUIET_START
+        end = self.db.get_setting(SETTING_QUIET_HOURS_END, _DEFAULT_QUIET_END) or _DEFAULT_QUIET_END
+        return enabled, start, end
+
+    def set_quiet_hours(self, enabled: bool, start: str, end: str) -> None:
+        self.db.set_setting(SETTING_QUIET_HOURS_ENABLED, "1" if enabled else "0")
+        self.db.set_setting(SETTING_QUIET_HOURS_START, start)
+        self.db.set_setting(SETTING_QUIET_HOURS_END, end)
+
+    def is_quiet_hours_active(self, now: datetime | None = None) -> bool:
+        enabled, start, end = self.quiet_hours()
+        if not enabled:
+            return False
+        now = now or datetime.now(timezone.utc)
+        if self.config is not None:
+            offset = runtime_settings.get_timezone_offset_minutes(self.db, self.config)
+            now = now.astimezone(timezone.utc) + timedelta(minutes=offset)
+        current = now.time()
+        start_t, end_t = _parse_hhmm(start), _parse_hhmm(end)
+        if start_t <= end_t:
+            return start_t <= current < end_t
+        return current >= start_t or current < end_t  # window wraps past midnight
+
+    def should_deliver(self, event_type: str) -> bool:
+        if not self.is_globally_enabled() or not self.is_type_enabled(event_type):
+            return False
+        if self.is_quiet_hours_active() and not self.ignores_quiet_hours(event_type):
+            return False
+        return True
+
+    def global_destination(self) -> str:
+        return self.db.get_setting(SETTING_GLOBAL_DESTINATION, _DEFAULT_GLOBAL_DESTINATION) or _DEFAULT_GLOBAL_DESTINATION
+
+    def set_global_destination(self, destination: str) -> None:
+        self.db.set_setting(SETTING_GLOBAL_DESTINATION, destination)
+
+    async def send_test(self, node: Node | None = None) -> dict[str, str]:
+        """Actually sends a test message and reports per-destination
+        success/failure (spec 8.4) - unlike every other notify_* method,
+        this doesn't swallow exceptions into a log line, because the
+        whole point is to show the admin whether delivery really works."""
+        if self.bot is None:
+            return {"bot": "❌ Бот не инициализирован"}
+        results: dict[str, str] = {}
+        text = "🧪 Тестовое уведомление Domain Monitor"
+        for admin_id in self.admin_ids:
+            try:
+                await self.bot.send_message(admin_id, text)
+                results[f"DM {admin_id}"] = "✅ Доставлено"
+            except Exception as exc:
+                results[f"DM {admin_id}"] = f"❌ {exc}"
+        if node is not None:
+            dest = self.global_destination() if node.notify_destination == "inherit" else node.notify_destination
+            if dest in ("group", "both") and node.notify_group_chat_id is not None:
+                try:
+                    await self.bot.send_message(
+                        node.notify_group_chat_id, text, message_thread_id=node.notify_group_topic_id,
+                    )
+                    results[f"Группа ({node.name})"] = "✅ Доставлено"
+                except Exception as exc:
+                    results[f"Группа ({node.name})"] = f"❌ {exc}"
+        return results
+
     async def schedule(self, node: Node, domain: str) -> None:
-        if self.bot is None or not self.is_globally_enabled() or not node.notifications_enabled:
+        if self.bot is None or not self.is_globally_enabled() or not self.is_type_enabled("new_domain") \
+                or not node.notifications_enabled:
             return  # no bot configured (API-only mode) - nothing to accumulate for
         async with self._lock:
             self._pending.append((node, domain))
@@ -108,7 +238,8 @@ class Notifier:
         """Watch-list hits bypass batching entirely - an operator who put a
         domain on the watch list wants to know the moment it appears, not
         folded into the next batch window."""
-        if self.bot is None or not self.is_watchlist_enabled() or not node.notifications_enabled:
+        if self.bot is None or not self.is_watchlist_enabled() or not self.should_deliver("watch_hit") \
+                or not node.notifications_enabled:
             return
         text = f"🚨 <b>WATCHLIST DOMAIN</b>\n\n<code>{domain}</code>\n\nНода: {node.name}"
         await self.deliver_for_node(node, text)
@@ -117,14 +248,14 @@ class Notifier:
         """Fired once per online->offline transition by NodeHealthMonitor
         - never on a timer, so a node that stays offline for a week
         doesn't produce a week of repeated pings."""
-        if self.bot is None or not node.notifications_enabled:
+        if self.bot is None or not node.notifications_enabled or not self.should_deliver("node_offline"):
             return
         text = f"🔴 Нода <b>{node.name}</b> недоступна (нет heartbeat)"
         await self.deliver_for_node(node, text)
 
     async def notify_recovered(self, node: Node) -> None:
         """Mirror of notify_offline() for the offline->online transition."""
-        if self.bot is None or not node.notifications_enabled:
+        if self.bot is None or not node.notifications_enabled or not self.should_deliver("node_recovered"):
             return
         text = f"🟢 Нода <b>{node.name}</b> снова на связи"
         await self.deliver_for_node(node, text)
@@ -146,6 +277,11 @@ class Notifier:
         async with self._lock:
             if not self._pending:
                 return
+            if not (self.is_globally_enabled() and self.is_type_enabled("new_domain")):
+                self._pending = []  # type turned off since these were scheduled - drop, don't deliver stale items
+                return
+            if self.is_quiet_hours_active() and not self.ignores_quiet_hours("new_domain"):
+                return  # hold the batch - retried next tick, delivered once quiet hours end
             batch, self._pending = self._pending, []
 
         if self.bot is None:

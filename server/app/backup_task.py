@@ -86,6 +86,8 @@ class BackupTask:
                 path = await asyncio.to_thread(self._create_backup_file)
             except Exception:
                 logger.exception("Failed to create backup archive")
+                if self.notifier.should_deliver("backup_failed"):
+                    await self.notifier.broadcast("❌ Автобэкап не удался: не получилось создать архив (см. логи сервера).")
                 return "❌ Не удалось создать архив бэкапа - подробности в логах сервера."
 
             backup_settings.set_last_run_at(self.db, datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"))
@@ -107,12 +109,15 @@ class BackupTask:
                 await self._deliver(path, dest)
             except Exception:
                 logger.exception("Failed to deliver backup via Telegram (destination=%s)", dest)
-                await self.notifier.broadcast(
-                    f"⚠️ Автобэкап создан, но не удалось отправить его через Telegram "
-                    f"(способ доставки: {dest}). Файл остался на сервере: <code>{name}</code>"
-                )
+                if self.notifier.should_deliver("backup_failed"):
+                    await self.notifier.broadcast(
+                        f"⚠️ Автобэкап создан, но не удалось отправить его через Telegram "
+                        f"(способ доставки: {dest}). Файл остался на сервере: <code>{name}</code>"
+                    )
                 return f"⚠️ Бэкап создан, но доставка не удалась: <code>{name}</code> (файл остался на сервере)"
 
+            if self.notifier.should_deliver("backup_success"):
+                await self.notifier.broadcast(f"✅ Автобэкап создан и отправлен: <code>{name}</code>")
             return f"✅ Бэкап создан и отправлен: <code>{name}</code>"
 
     def _create_backup_file(self) -> str:
