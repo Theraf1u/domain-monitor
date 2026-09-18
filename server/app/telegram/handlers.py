@@ -17,6 +17,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, Message
 
 from app import backup_settings, fleet_control, runtime_settings
+from app.agent_versions import version_badge
 from app.backup_task import BackupTask
 from app.config import Config
 from app.database import Database
@@ -353,11 +354,12 @@ async def cb_node_card(call: CallbackQuery, db: Database, config: Config) -> Non
         ) if node.notify_group_chat_id else "не привязано"
         dest_line += f" ({where})"
 
+    version_line = version_badge(node.version) or f"Версия агента: {node.version or '—'}"
     text = (
         f"🖥 <b>{node.name}</b>\n\n"
         f"Статус: {status_line}\n"
         f"Последний heartbeat: {hb_line}\n"
-        f"Версия агента: {node.version or '—'}\n"
+        f"{version_line}\n"
         f"IP: {node.ip or '—'}\n"
         f"Hostname: {node.hostname or '—'}\n"
         f"{uptime_line}"
@@ -395,7 +397,7 @@ def _build_node_check_text(node, db: Database, config: Config) -> str:
     else:
         issues.append("от ноды ещё не было ни одного heartbeat")
 
-    lines.append(f"Версия агента: {node.version or '—'}")
+    lines.append(version_badge(node.version) or f"Версия агента: {node.version or '—'}")
     if not effective_monitoring:
         why = "выключен на ноде" if not node.monitoring_enabled else "выключен на всей флотилии"
         lines.append(f"Мониторинг: на паузе ({why}) - capture ожидаемо не запущен")
