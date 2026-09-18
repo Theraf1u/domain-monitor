@@ -602,14 +602,17 @@ def notify_menu(current_mode: str, global_enabled: bool) -> InlineKeyboardMarkup
 # Settings
 # ------------------------------------------------------------------
 
-def settings_menu(retention_days: int, offline_seconds: int, watchlist_enabled: bool) -> InlineKeyboardMarkup:
+def settings_menu(
+    retention_days: int, offline_seconds: int, watchlist_enabled: bool, timezone_label: str = "UTC",
+) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text=f"🗓 Хранение событий: {retention_days} дн.", callback_data="settings_retention", style="primary")
     b.button(text=f"⏱ Offline через: {offline_seconds} сек", callback_data="settings_offline", style="primary")
+    b.button(text=f"🌍 Часовой пояс: {timezone_label}", callback_data="settings_timezone", style="primary")
     wl_label = _toggle_label("Watch-уведомления включены", "Watch-уведомления выключены", watchlist_enabled)
     b.button(text=wl_label, callback_data="settings_toggle_watchlist", style=_toggle_style(watchlist_enabled))
     b.button(text="⬅️ Назад", callback_data="main")
-    b.adjust(1, 1, 1, 1)
+    b.adjust(1, 1, 1, 1, 1)
     return b.as_markup()
 
 

@@ -4,7 +4,7 @@ renders them the same way instead of each handler rolling its own.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 
 def format_bytes(num_bytes: int | float) -> str:
@@ -62,3 +62,22 @@ def format_datetime(when: datetime | None) -> str:
     if when is None:
         return "—"
     return when.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def format_timezone_offset(offset_minutes: int) -> str:
+    """180 -> "UTC+3", -330 -> "UTC-5:30", 0 -> "UTC"."""
+    if offset_minutes == 0:
+        return "UTC"
+    sign = "+" if offset_minutes > 0 else "-"
+    hours, minutes = divmod(abs(offset_minutes), 60)
+    return f"UTC{sign}{hours}" + (f":{minutes:02d}" if minutes else "")
+
+
+def format_datetime_local(when: datetime | None, offset_minutes: int) -> str:
+    """Same as format_datetime(), but converted to the admin's configured
+    timezone (spec 7.2) instead of always showing UTC. Still stores/compares
+    in UTC everywhere else - this is a display-only conversion."""
+    if when is None:
+        return "—"
+    local = when.astimezone(timezone.utc) + timedelta(minutes=offset_minutes)
+    return local.strftime("%Y-%m-%d %H:%M") + f" ({format_timezone_offset(offset_minutes)})"

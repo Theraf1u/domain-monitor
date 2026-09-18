@@ -29,7 +29,10 @@ from app.live_view import LiveViewManager
 from app.notifier import Notifier
 from app.security import generate_node_token, hash_token
 from app.telegram import keyboards as kb
-from app.telegram.formatters import format_bytes, format_datetime, format_duration, format_relative_time
+from app.telegram.formatters import (
+    format_bytes, format_datetime, format_datetime_local, format_duration, format_relative_time,
+    format_timezone_offset,
+)
 from app.topic_binding import TopicBindingManager
 
 logger = logging.getLogger(__name__)
@@ -60,6 +63,7 @@ class Inputs(StatesGroup):
     waiting_for_custom_batch_seconds = State()
     waiting_for_retention_days = State()
     waiting_for_offline_seconds = State()
+    waiting_for_timezone_offset = State()
     waiting_for_backup_interval = State()
     waiting_for_backup_keep = State()
     waiting_for_backup_group_chat_id = State()
@@ -72,11 +76,19 @@ def _online_ids(db: Database, config: Config) -> set[int]:
     return {n.id for n in db.list_nodes() if n.is_online(offline_after, now)}
 
 
-def _period_range(period: str, now: datetime) -> tuple[datetime | None, datetime | None]:
+def _period_range(
+    period: str, now: datetime, tz_offset_minutes: int = 0,
+) -> tuple[datetime | None, datetime | None]:
     """Maps a period key (shared by the export and stats menus) to a
     [since, until) window. None on either side means "no bound in that
-    direction" - "all" is (None, None)."""
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    direction" - "all" is (None, None). "today"/"yesterday" are calendar
+    days in the admin's configured timezone (spec 7.2), not UTC - shift
+    into local time to find local midnight, then shift the boundary back
+    to UTC for the actual DB comparison (everything is still stored and
+    compared in UTC; only the boundary's *position* is timezone-aware)."""
+    local_now = now + timedelta(minutes=tz_offset_minutes)
+    today_start_local = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = today_start_local - timedelta(minutes=tz_offset_minutes)
     if period == "1h":
         return now - timedelta(hours=1), None
     if period == "6h":
@@ -124,7 +136,8 @@ def _dashboard_text(db: Database, config: Config, notifier: Notifier) -> str:
     offline_after = runtime_settings.get_node_offline_after_seconds(db, config)
     nodes = db.list_nodes()
     online = sum(1 for n in nodes if n.is_online(offline_after, now))
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    tz_offset = runtime_settings.get_timezone_offset_minutes(db, config)
+    today_start, _ = _period_range("today", now, tz_offset)
     new_today = db.count_domains(since=today_start)
     buffered_total = sum(n.agent_buffer_size or 0 for n in nodes)
     watch_state = "включены" if notifier.is_watchlist_enabled() else "выключены"
@@ -871,10 +884,11 @@ async def cb_domains_export_menu(call: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("domains_export_period:"))
-async def cb_domains_export_period(call: CallbackQuery, db: Database) -> None:
+async def cb_domains_export_period(call: CallbackQuery, db: Database, config: Config) -> None:
     period = call.data.split(":", 1)[1]
     now = datetime.now(timezone.utc)
-    since, until = _period_range(period, now)
+    tz_offset = runtime_settings.get_timezone_offset_minutes(db, config)
+    since, until = _period_range(period, now, tz_offset)
     label = dict(kb.EXPORT_PERIODS).get(period, period)
     domains = db.list_domains(limit=1_000_000, order_by="domain", since=since, until=until)
     if not domains:
@@ -1416,11 +1430,12 @@ def _stats_text(
     db: Database, config: Config, period: str, custom_range: tuple[datetime, datetime] | None = None,
 ) -> str:
     now = datetime.now(timezone.utc)
+    tz_offset = runtime_settings.get_timezone_offset_minutes(db, config)
     if period == "custom" and custom_range is not None:
         since, until = custom_range
         period_label = f"{since.date()} — {(until - timedelta(seconds=1)).date()}"
     else:
-        since, until = _period_range(period, now)
+        since, until = _period_range(period, now, tz_offset)
         period_label = dict(kb.DOMAIN_PERIODS).get(period, period)
 
     offline_after = runtime_settings.get_node_offline_after_seconds(db, config)
@@ -1561,7 +1576,8 @@ async def cb_stats_node_menu(call: CallbackQuery, db: Database) -> None:
 
 def _node_stats_text(db: Database, config: Config, node, period: str) -> str:
     now = datetime.now(timezone.utc)
-    since, until = _period_range(period, now)
+    tz_offset = runtime_settings.get_timezone_offset_minutes(db, config)
+    since, until = _period_range(period, now, tz_offset)
     period_label = dict(kb.DOMAIN_PERIODS).get(period, period)
 
     events_count = db.count_events_since(since or _EPOCH, until, node_id=node.id)
@@ -2177,6 +2193,8 @@ async def on_filter_check_input(message: Message, state: FSMContext, db: Databas
 async def cb_settings(call: CallbackQuery, db: Database, config: Config, notifier: Notifier) -> None:
     retention_days = runtime_settings.get_event_retention_days(db, config)
     offline_seconds = runtime_settings.get_node_offline_after_seconds(db, config)
+    tz_offset = runtime_settings.get_timezone_offset_minutes(db, config)
+    now = datetime.now(timezone.utc)
     text = (
         "⚙️ <b>Настройки</b>\n\n"
         f"🖥 Центр управления (этот бот): <code>{config.public_url}</code>\n"
@@ -2184,12 +2202,15 @@ async def cb_settings(call: CallbackQuery, db: Database, config: Config, notifie
         f"Хранение событий: {retention_days} дн. (0 — хранить всегда; не влияет на список доменов, "
         f"только на детальную историю)\n"
         f"Нода считается offline после: {offline_seconds} сек без heartbeat\n"
+        f"Часовой пояс: {format_timezone_offset(tz_offset)} (сейчас там {format_datetime_local(now, tz_offset)})\n"
         f"Watch-уведомления: {'включены' if notifier.is_watchlist_enabled() else 'выключены'}\n"
         f"Админы: {', '.join(str(a) for a in config.admin_ids)}"
     )
     await call.message.edit_text(
         text, parse_mode="HTML",
-        reply_markup=kb.settings_menu(retention_days, offline_seconds, notifier.is_watchlist_enabled()),
+        reply_markup=kb.settings_menu(
+            retention_days, offline_seconds, notifier.is_watchlist_enabled(), format_timezone_offset(tz_offset),
+        ),
     )
     await call.answer()
 
@@ -2238,6 +2259,43 @@ async def on_offline_seconds_input(message: Message, state: FSMContext, db: Data
         return
     runtime_settings.set_node_offline_after_seconds(db, int(raw))
     await message.answer(f"✅ Offline через: {raw} сек.", reply_markup=kb.back_button("settings"))
+
+
+@router.callback_query(F.data == "settings_timezone")
+async def cb_settings_timezone(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(Inputs.waiting_for_timezone_offset)
+    await call.message.edit_text(
+        "Часовой пояс для отображения времени и границ «сегодня»/«вчера».\n"
+        "Введите смещение от UTC в часах, например <code>+3</code> (Москва) или <code>-5</code>, "
+        "или <code>0</code> для UTC:",
+        parse_mode="HTML", reply_markup=kb.cancel_input("settings"),
+    )
+    await call.answer()
+
+
+@router.message(Inputs.waiting_for_timezone_offset)
+async def on_timezone_offset_input(message: Message, state: FSMContext, db: Database) -> None:
+    await state.clear()
+    raw = (message.text or "").strip().replace(",", ".")
+    try:
+        hours = float(raw)
+    except ValueError:
+        await message.answer(
+            "Нужно число часов, например <code>+3</code> или <code>-5</code>. Попробуйте снова из настроек.",
+            parse_mode="HTML", reply_markup=kb.back_button("settings"),
+        )
+        return
+    if not -12 <= hours <= 14:
+        await message.answer(
+            "Смещение должно быть от -12 до +14 часов. Попробуйте снова из настроек.",
+            reply_markup=kb.back_button("settings"),
+        )
+        return
+    minutes = round(hours * 60)
+    runtime_settings.set_timezone_offset_minutes(db, minutes)
+    await message.answer(
+        f"✅ Часовой пояс: {format_timezone_offset(minutes)}", reply_markup=kb.back_button("settings"),
+    )
 
 
 @router.callback_query(F.data == "settings_toggle_watchlist")

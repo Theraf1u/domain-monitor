@@ -6,11 +6,35 @@ touched in the menu behaves exactly as it did before this existed.
 """
 from __future__ import annotations
 
+import time
+
 from app.config import Config
 from app.database import Database
 
 SETTING_EVENT_RETENTION_DAYS = "event_retention_days"
 SETTING_NODE_OFFLINE_AFTER_SECONDS = "node_offline_after_seconds"
+SETTING_TIMEZONE_OFFSET_MINUTES = "timezone_offset_minutes"
+
+
+def _host_timezone_offset_minutes() -> int:
+    """Best-effort guess at the host's local timezone, used only as the
+    default before anyone has set one explicitly via the bot (spec 7.2:
+    "по умолчанию попытаться определить timezone хоста, иначе UTC").
+    time.timezone/altzone are already host-local by definition - no
+    external tzdata lookup needed, so this can't fail."""
+    offset_seconds = -(time.altzone if time.daylight and time.localtime().tm_isdst else time.timezone)
+    return offset_seconds // 60
+
+
+def get_timezone_offset_minutes(db: Database, config: Config) -> int:
+    raw = db.get_setting(SETTING_TIMEZONE_OFFSET_MINUTES)
+    if raw is not None:
+        return int(raw)
+    return _host_timezone_offset_minutes()
+
+
+def set_timezone_offset_minutes(db: Database, minutes: int) -> None:
+    db.set_setting(SETTING_TIMEZONE_OFFSET_MINUTES, str(minutes))
 
 
 def get_event_retention_days(db: Database, config: Config) -> int:
