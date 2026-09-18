@@ -14,7 +14,7 @@ from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import BufferedInputFile, CallbackQuery, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, Message
 
 from app import backup_settings, fleet_control, runtime_settings
 from app.backup_task import BackupTask
@@ -45,6 +45,7 @@ async def cb_noop(call: CallbackQuery) -> None:
 
 class Inputs(StatesGroup):
     waiting_for_node_rename = State()
+    waiting_for_node_search = State()
     waiting_for_filter_pattern = State()
     waiting_for_filter_check = State()
     waiting_for_export_range = State()
@@ -157,20 +158,143 @@ async def cb_fleet_toggle_sending(
 # Nodes
 # ------------------------------------------------------------------
 
-_NODES_LEGEND = "🟢 работает   🔴 отозвана/не отвечает   🔵 на паузе"
+def _node_category(node, online_ids: set[int], fleet_mon: bool) -> str:
+    if node.status == "revoked":
+        return "revoked"
+    if node.id not in online_ids:
+        return "offline"
+    if not (node.monitoring_enabled and fleet_mon):
+        return "paused"
+    return "online"
+
+
+def _node_matches_filter(node, filter_key: str, online_ids: set[int], fleet_mon: bool) -> bool:
+    if filter_key == "all":
+        return True
+    if filter_key == "full_buffer":
+        return (
+            node.buffer_bytes is not None and node.buffer_limit_bytes
+            and node.buffer_bytes / node.buffer_limit_bytes >= 0.9
+        )
+    return _node_category(node, online_ids, fleet_mon) == filter_key
+
+
+def _node_matches_search(node, term: str) -> bool:
+    if not term:
+        return True
+    term = term.lower()
+    return (
+        term in node.name.lower()
+        or term in (node.ip or "").lower()
+        or term in (node.hostname or "").lower()
+    )
+
+
+async def _nodes_state(state: FSMContext) -> tuple[str, str]:
+    data = await state.get_data()
+    return data.get("nodes_filter", "all"), data.get("nodes_search", "")
+
+
+def _build_nodes_screen(
+    db: Database, config: Config, filter_key: str, search: str, page: int,
+) -> tuple[str, InlineKeyboardMarkup]:
+    nodes = db.list_nodes()
+    online_ids = _online_ids(db, config)
+    fleet_mon = fleet_control.is_monitoring_enabled(db)
+    filtered = [
+        n for n in nodes
+        if _node_matches_filter(n, filter_key, online_ids, fleet_mon) and _node_matches_search(n, search)
+    ]
+    counts = {
+        cat: sum(1 for n in nodes if _node_category(n, online_ids, fleet_mon) == cat)
+        for cat in ("online", "paused", "offline", "revoked")
+    }
+    page_nodes = filtered[page * kb.NODES_PAGE_SIZE:(page + 1) * kb.NODES_PAGE_SIZE]
+
+    lines = [
+        "📡 <b>Ноды</b>",
+        f"🟢 Online: {counts['online']}   🔵 На паузе: {counts['paused']}   "
+        f"🔴 Offline: {counts['offline']}   ⚫ Отозваны: {counts['revoked']}",
+    ]
+    if search:
+        lines.append(f"🔎 Поиск: «{html.escape(search)}»")
+    if filter_key != "all":
+        lines.append(f"Фильтр: {kb.NODE_FILTER_LABELS.get(filter_key, filter_key)}")
+    lines.append("")
+    if not nodes:
+        lines.append("Пока не добавлено ни одной ноды.")
+    elif not filtered:
+        lines.append("Ничего не найдено по текущим поиску/фильтру.")
+    else:
+        lines.append("Выберите ноду для управления:")
+    text = "\n".join(lines)
+    markup = kb.nodes_list(page_nodes, online_ids, fleet_mon, filter_key, bool(search), page, len(filtered))
+    return text, markup
 
 
 @router.callback_query(F.data == "nodes")
-async def cb_nodes(call: CallbackQuery, db: Database, config: Config) -> None:
-    nodes = db.list_nodes()
-    fleet_mon = fleet_control.is_monitoring_enabled(db)
-    if not nodes:
-        text = "📡 <b>Ноды</b>\n\nПока не добавлено ни одной ноды."
-    else:
-        text = f"📡 <b>Ноды</b>\n{_NODES_LEGEND}\n\nВыберите ноду для управления:"
+async def cb_nodes(call: CallbackQuery, state: FSMContext, db: Database, config: Config) -> None:
+    await state.set_state(None)
+    filter_key, search = await _nodes_state(state)
+    text, markup = _build_nodes_screen(db, config, filter_key, search, page=0)
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("nodes_page:"))
+async def cb_nodes_page(call: CallbackQuery, state: FSMContext, db: Database, config: Config) -> None:
+    page = int(call.data.split(":")[1])
+    filter_key, search = await _nodes_state(state)
+    text, markup = _build_nodes_screen(db, config, filter_key, search, page)
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+    await call.answer()
+
+
+@router.callback_query(F.data == "nodes_filter_menu")
+async def cb_nodes_filter_menu(call: CallbackQuery, state: FSMContext) -> None:
+    filter_key, _ = await _nodes_state(state)
     await call.message.edit_text(
-        text, parse_mode="HTML", reply_markup=kb.nodes_list(nodes, _online_ids(db, config), fleet_mon),
+        "📡 Выберите фильтр по статусу ноды:", reply_markup=kb.nodes_filter_menu(filter_key),
     )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("nodes_filter_set:"))
+async def cb_nodes_filter_set(call: CallbackQuery, state: FSMContext, db: Database, config: Config) -> None:
+    filter_key = call.data.split(":")[1]
+    await state.update_data(nodes_filter=filter_key)
+    _, search = await _nodes_state(state)
+    text, markup = _build_nodes_screen(db, config, filter_key, search, page=0)
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+    await call.answer()
+
+
+@router.callback_query(F.data == "nodes_search")
+async def cb_nodes_search_prompt(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(Inputs.waiting_for_node_search)
+    await call.message.edit_text(
+        "🔎 Введите часть имени, IP или hostname ноды для поиска:",
+        reply_markup=kb.cancel_input("nodes"),
+    )
+    await call.answer()
+
+
+@router.message(Inputs.waiting_for_node_search)
+async def on_node_search_input(message: Message, state: FSMContext, db: Database, config: Config) -> None:
+    term = (message.text or "").strip()
+    await state.set_state(None)
+    await state.update_data(nodes_search=term)
+    filter_key, _ = await _nodes_state(state)
+    text, markup = _build_nodes_screen(db, config, filter_key, term, page=0)
+    await message.answer(text, parse_mode="HTML", reply_markup=markup)
+
+
+@router.callback_query(F.data == "nodes_search_clear")
+async def cb_nodes_search_clear(call: CallbackQuery, state: FSMContext, db: Database, config: Config) -> None:
+    await state.update_data(nodes_search="")
+    filter_key, _ = await _nodes_state(state)
+    text, markup = _build_nodes_screen(db, config, filter_key, "", page=0)
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
     await call.answer()
 
 
@@ -385,11 +509,11 @@ async def cb_node_delete_confirm_prompt(call: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("node_delete_confirm:"))
-async def cb_node_delete(call: CallbackQuery, db: Database, config: Config) -> None:
+async def cb_node_delete(call: CallbackQuery, state: FSMContext, db: Database, config: Config) -> None:
     node_id = int(call.data.split(":")[1])
     db.delete_node(node_id)
     await call.answer("Нода удалена")
-    await cb_nodes(call, db, config)
+    await cb_nodes(call, state, db, config)
 
 
 _INSTALL_ONE_LINER = (

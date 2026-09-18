@@ -113,14 +113,42 @@ def confirm_keyboard(
 # Nodes
 # ------------------------------------------------------------------
 
-def nodes_list(nodes: list[Node], online_ids: set[int], fleet_monitoring_enabled: bool = True) -> InlineKeyboardMarkup:
+NODES_PAGE_SIZE = 10
+
+NODE_FILTER_LABELS = {
+    "all": "Все",
+    "online": "🟢 Online",
+    "paused": "🔵 На паузе",
+    "offline": "🔴 Offline",
+    "revoked": "⚫ Отозваны",
+    "full_buffer": "📦 Буфер заполнен",
+}
+
+
+def nodes_list(
+    nodes: list[Node], online_ids: set[int], fleet_monitoring_enabled: bool,
+    filter_key: str, has_search: bool, page: int, total_filtered: int,
+) -> InlineKeyboardMarkup:
     """Node status is shown by button COLOR, not an emoji dot: green =
     agent online and actively monitoring, red = revoked or not
     responding, blue = online but paused (either this node's own
     monitoring toggle or the fleet-wide one is off). The legend for
     this lives in the screen's text (see handlers._nodes_legend), since
-    Telegram gives us only three button colors to work with."""
+    Telegram gives us only three button colors to work with.
+
+    `nodes` is already the current page's slice - this function only
+    renders, it doesn't filter/paginate (that's handlers._build_nodes_screen,
+    kept out of the presentation layer)."""
     b = InlineKeyboardBuilder()
+    b.button(text="➕ Добавить", callback_data="node_add", style="primary")
+    b.button(text="🔎 Поиск", callback_data="nodes_search")
+    filter_label = "⚙️ Фильтр: " + NODE_FILTER_LABELS.get(filter_key, filter_key)
+    b.button(text=filter_label, callback_data="nodes_filter_menu")
+    rows = [1, 2]
+    if has_search:
+        b.button(text="✖️ Сбросить поиск", callback_data="nodes_search_clear")
+        rows.append(1)
+
     for node in nodes:
         if node.status == "revoked":
             label, style = f"{node.name} (отозвана)", "danger"
@@ -131,8 +159,24 @@ def nodes_list(nodes: list[Node], online_ids: set[int], fleet_monitoring_enabled
         else:
             label, style = node.name, "success"
         b.button(text=label, callback_data=f"node:{node.id}", style=style)
-    b.button(text="➕ Добавить", callback_data="node_add", style="primary")
+    rows.extend([1] * len(nodes))
+
+    if total_filtered > NODES_PAGE_SIZE:
+        nav_count = add_pagination_row(b, page, NODES_PAGE_SIZE, total_filtered, "nodes_page")
+        rows.append(nav_count)
+
     b.button(text="⬅️ Назад", callback_data="main")
+    rows.append(1)
+    b.adjust(*rows)
+    return b.as_markup()
+
+
+def nodes_filter_menu(current: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for key, label in NODE_FILTER_LABELS.items():
+        prefix = "✅ " if key == current else ""
+        b.button(text=f"{prefix}{label}", callback_data=f"nodes_filter_set:{key}")
+    b.button(text="⬅️ Назад", callback_data="nodes")
     b.adjust(1)
     return b.as_markup()
 
