@@ -382,21 +382,26 @@ class Database:
 
     def _domains_where(
         self, search: str | None = None, node_id: int | None = None,
-        since: datetime | None = None, until: datetime | None = None, new_only: bool = False,
+        since: datetime | None = None, until: datetime | None = None, since_field: str = "first_seen",
         source: str | None = None, ignored: bool | None = None, min_hits: int | None = None,
         list_status: str | None = None,
     ) -> tuple[str, list[object]]:
         """Shared WHERE-clause builder for list_domains()/count_domains() so
         pagination totals and the page itself never drift apart. `since`/
-        `until` filter on first_seen when new_only is set (domains that
-        appeared in the window), otherwise on last_seen (domains active in
-        the window) - matches the "новые за период" vs "за период" distinction
-        in the spec. `list_status` in {"ignore", "allow", "watch"} matches
-        against enabled filter_rules of that list; wildcard patterns are
-        translated to SQL LIKE (fnmatch's `*`/`?` -> `%`/`_`), which is only
-        an approximation of fnmatch semantics but good enough for filtering
-        a list (classify_domain() remains the source of truth for a single
-        domain's actual verdict, e.g. on the domain card)."""
+        `until` filter on `since_field` - "first_seen" (the default, and the
+        only behavior before the domains list/filter screen existed: every
+        existing caller - stats' "new domains", the period TXT export - means
+        "domains that appeared in this window", so the default must stay
+        first_seen to not silently change what already-deployed screens
+        report) or "last_seen" (domains active in the window, the domains
+        list screen's normal "Период" filter; its separate "только новые"
+        toggle switches this back to first_seen). `list_status` in
+        {"ignore", "allow", "watch"} matches against enabled filter_rules of
+        that list; wildcard patterns are translated to SQL LIKE (fnmatch's
+        `*`/`?` -> `%`/`_`), which is only an approximation of fnmatch
+        semantics but good enough for filtering a list (classify_domain()
+        remains the source of truth for a single domain's actual verdict,
+        e.g. on the domain card)."""
         clauses: list[str] = []
         params: list[object] = []
         if search:
@@ -405,7 +410,7 @@ class Database:
         if node_id is not None:
             clauses.append("node_id = ?")
             params.append(node_id)
-        ts_col = "first_seen" if new_only else "last_seen"
+        ts_col = "last_seen" if since_field == "last_seen" else "first_seen"
         if since is not None:
             clauses.append(f"{ts_col} >= ?")
             params.append(_fmt_ts(since))
@@ -464,7 +469,7 @@ class Database:
     def list_domains(
         self, limit: int = 50, offset: int = 0, search: str | None = None,
         order_by: str = "last_seen", node_id: int | None = None,
-        since: datetime | None = None, until: datetime | None = None, new_only: bool = False,
+        since: datetime | None = None, until: datetime | None = None, since_field: str = "first_seen",
         source: str | None = None, ignored: bool | None = None, min_hits: int | None = None,
         list_status: str | None = None,
     ) -> list[Domain]:
@@ -475,7 +480,7 @@ class Database:
             "domain": "domain ASC",
         }.get(order_by, "last_seen DESC")
         where, params = self._domains_where(
-            search=search, node_id=node_id, since=since, until=until, new_only=new_only,
+            search=search, node_id=node_id, since=since, until=until, since_field=since_field,
             source=source, ignored=ignored, min_hits=min_hits, list_status=list_status,
         )
         with self._lock:
@@ -487,12 +492,12 @@ class Database:
 
     def count_domains(
         self, search: str | None = None, node_id: int | None = None,
-        since: datetime | None = None, until: datetime | None = None, new_only: bool = False,
+        since: datetime | None = None, until: datetime | None = None, since_field: str = "first_seen",
         source: str | None = None, ignored: bool | None = None, min_hits: int | None = None,
         list_status: str | None = None,
     ) -> int:
         where, params = self._domains_where(
-            search=search, node_id=node_id, since=since, until=until, new_only=new_only,
+            search=search, node_id=node_id, since=since, until=until, since_field=since_field,
             source=source, ignored=ignored, min_hits=min_hits, list_status=list_status,
         )
         with self._lock:

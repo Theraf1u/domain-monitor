@@ -941,7 +941,8 @@ async def _get_domain_search(state: FSMContext) -> str | None:
 def _domains_query_kwargs(search: str | None, filters: dict) -> dict:
     since, until = _period_range(filters["period"], datetime.now(timezone.utc))
     return dict(
-        search=search, node_id=filters["node_id"], since=since, until=until, new_only=filters["new_only"],
+        search=search, node_id=filters["node_id"], since=since, until=until,
+        since_field="first_seen" if filters["new_only"] else "last_seen",
         source=None if filters["source"] == "all" else filters["source"],
         min_hits=DOMAIN_MINHITS_VALUES.get(filters["min_hits"]),
         list_status=None if filters["status"] == "all" else filters["status"],
