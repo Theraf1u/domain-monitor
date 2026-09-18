@@ -14,7 +14,7 @@ from fastapi.responses import Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app import runtime_settings
-from app.api import domains, events, nodes, stats
+from app.api import domains, events, migration, nodes, stats
 from app.backup_task import BackupTask
 from app.config import load_config
 from app.database import Database
@@ -101,8 +101,15 @@ async def lifespan(app: FastAPI):
         # Cosmetic (command hint, menu button, description, photo) - never
         # worth failing server startup over a transient Telegram API hiccup.
         logger.exception("Failed to configure bot profile - continuing anyway")
-    background_tasks.append(asyncio.create_task(_run_polling_forever(dp, bot, stop_polling)))
-    logger.info("Telegram bot enabled (admin_ids=%s)", config.admin_ids)
+    if config.telegram_polling_enabled:
+        background_tasks.append(asyncio.create_task(_run_polling_forever(dp, bot, stop_polling)))
+        logger.info("Telegram bot enabled (admin_ids=%s)", config.admin_ids)
+    else:
+        # Migration 2.0 standby mode (spec 3.8): API/heartbeat are live for
+        # target verification, but this process never calls getUpdates, so
+        # it can never conflict with a still-live old server polling the
+        # same bot token.
+        logger.info("Telegram polling disabled (TELEGRAM_POLLING_ENABLED=false - standby mode)")
 
     logger.info("Domain Monitor Server started on %s:%s", config.host, config.port)
     try:
@@ -128,6 +135,7 @@ app.include_router(nodes.router)
 app.include_router(events.router)
 app.include_router(domains.router)
 app.include_router(stats.router)
+app.include_router(migration.router)
 
 
 @app.get("/healthz")

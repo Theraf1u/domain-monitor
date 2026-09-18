@@ -36,7 +36,14 @@ if [ ! -f "$ENV_FILE" ]; then
     exit 1
 fi
 
-if ! tar -tzf "$ARCHIVE" 2>/dev/null | grep -q '^data/domain_monitor\.db$'; then
+# A plain `tar | grep -q` pipeline is racy under `set -o pipefail`: grep
+# -q exits the instant it finds a match, tar can get SIGPIPE writing the
+# rest of its listing, and pipefail then reports the PIPELINE as failed
+# even though grep matched - so this reads the listing into a variable
+# first and greps that (a shell redirection, not a live pipe between two
+# processes), which can't race.
+archive_listing="$(tar -tzf "$ARCHIVE" 2>/dev/null)"
+if ! grep -q '^data/domain_monitor\.db$' <<<"$archive_listing"; then
     echo "✗ Это не похоже на пакет миграции (нет data/domain_monitor.db внутри): $ARCHIVE" >&2
     exit 1
 fi

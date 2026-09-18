@@ -45,6 +45,13 @@ class Config:
     node_offline_after_seconds: int
     events_rate_limit_capacity: float
     events_rate_limit_per_second: float
+    # Migration 2.0 (spec section 3.8): a migration target is brought up
+    # in standby - API/heartbeat live for verification, but Telegram
+    # polling OFF - so it never fights the still-live old server for the
+    # same bot token (Telegram allows only one long-poll consumer per
+    # token; a second one gets 409 Conflict and can knock the first one
+    # off). Defaults to enabled so every existing install is unaffected.
+    telegram_polling_enabled: bool
 
 
 def load_config() -> Config:
@@ -108,4 +115,5 @@ def load_config() -> Config:
         node_offline_after_seconds=int(_optional("NODE_OFFLINE_AFTER_SECONDS", "90")),
         events_rate_limit_capacity=float(_optional("EVENTS_RATE_LIMIT_CAPACITY", "30")),
         events_rate_limit_per_second=float(_optional("EVENTS_RATE_LIMIT_PER_SECOND", "5")),
+        telegram_polling_enabled=_optional("TELEGRAM_POLLING_ENABLED", "true").lower() not in ("false", "0", "no"),
     )

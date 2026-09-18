@@ -581,6 +581,18 @@ main() {
         install_dm_command
         exec bash "$PROJECT_DIR/agent/install-agent.sh" "$2" "$3"
     fi
+    # Non-interactive, used only by `domain-monitor-server migrate-to`
+    # (spec 2.0 Part 2, section 3) - runs on the migration TARGET over
+    # SSH, invoked by the source server's own migrate_to.sh, not by a
+    # human. $2 is the migration package this same SSH session already
+    # copied over. See server/scripts/migrate_target_bootstrap.sh for
+    # what "standby" means here.
+    if [ "${1:-}" = "server-migrate-target" ] && [ -n "${2:-}" ]; then
+        resolve_project_dir
+        ensure_bootstrap_deps
+        install_dm_command
+        exec bash "$PROJECT_DIR/server/scripts/migrate_target_bootstrap.sh" "$2"
+    fi
     resolve_project_dir
     ensure_bootstrap_deps
     install_dm_command

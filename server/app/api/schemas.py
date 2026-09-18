@@ -109,6 +109,24 @@ class HeartbeatResponse(BaseModel):
     migration_target_url: str | None = None
 
 
+class MigrationJobCreateRequest(BaseModel):
+    target_url: str = Field(min_length=1, max_length=500)
+
+
+class MigrationJobResponse(BaseModel):
+    id: int
+    target_url: str
+    status: str
+    created_at: str
+    updated_at: str
+    error: str | None = None
+
+
+class MigrationJobStatusUpdateRequest(BaseModel):
+    status: str
+    error: str | None = None
+
+
 class EventIn(BaseModel):
     domain: str
     occurred_at: datetime | None = None

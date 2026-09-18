@@ -15,6 +15,11 @@
 #   domain-monitor-server add-node   добавить ноду в одно действие (без имени)
 #   domain-monitor-server migrate-export        собрать пакет для переноса на другой сервер
 #   domain-monitor-server migrate-import <файл> перенести бота с другого сервера из пакета
+#   domain-monitor-server migrate-to <root@host> [-i ключ]  автоматически перенести на новый сервер (standby)
+#   domain-monitor-server migrate-cutover <id>  переключить агентов на новый сервер
+#   domain-monitor-server migrate-status [id]   прогресс переключения нод
+#   domain-monitor-server migrate-finish <id>   переключить Telegram-бота, завершить миграцию
+#   domain-monitor-server migrate-cancel <id>   отменить незавершённую миграцию
 set -uo pipefail
 
 # Resolve through the /usr/local/bin symlink the installer creates - a
@@ -43,7 +48,12 @@ case "$cmd" in
     add-node)  bash "$SCRIPTS_DIR/add_node.sh" ;;
     migrate-export) bash "$SCRIPTS_DIR/migrate_export.sh" ;;
     migrate-import) bash "$SCRIPTS_DIR/migrate_import.sh" "${2:-}" ;;
-    -h|--help|help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//' ;;
+    migrate-to)     bash "$SCRIPTS_DIR/migrate_to.sh" "${@:2}" ;;
+    migrate-cutover) bash "$SCRIPTS_DIR/migrate_cutover.sh" "${2:-}" ;;
+    migrate-status) bash "$SCRIPTS_DIR/migrate_status.sh" "${2:-}" ;;
+    migrate-finish) bash "$SCRIPTS_DIR/migrate_finish.sh" "${@:2}" ;;
+    migrate-cancel) bash "$SCRIPTS_DIR/migrate_cancel.sh" "${2:-}" ;;
+    -h|--help|help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//' ;;
     *)
         echo "Неизвестная команда: $cmd" >&2
         echo "Запусти 'domain-monitor-server help' для справки." >&2
