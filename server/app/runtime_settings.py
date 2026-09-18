@@ -37,6 +37,27 @@ def set_timezone_offset_minutes(db: Database, minutes: int) -> None:
     db.set_setting(SETTING_TIMEZONE_OFFSET_MINUTES, str(minutes))
 
 
+SETTING_BUFFER_WARNING_PCT = "buffer_warning_pct"
+SETTING_BUFFER_CRITICAL_PCT = "buffer_critical_pct"
+_DEFAULT_BUFFER_WARNING_PCT = 70
+_DEFAULT_BUFFER_CRITICAL_PCT = 90
+
+
+def get_buffer_warning_pct(db: Database) -> int:
+    raw = db.get_setting(SETTING_BUFFER_WARNING_PCT)
+    return int(raw) if raw is not None else _DEFAULT_BUFFER_WARNING_PCT
+
+
+def get_buffer_critical_pct(db: Database) -> int:
+    raw = db.get_setting(SETTING_BUFFER_CRITICAL_PCT)
+    return int(raw) if raw is not None else _DEFAULT_BUFFER_CRITICAL_PCT
+
+
+def set_buffer_thresholds(db: Database, warning_pct: int, critical_pct: int) -> None:
+    db.set_setting(SETTING_BUFFER_WARNING_PCT, str(warning_pct))
+    db.set_setting(SETTING_BUFFER_CRITICAL_PCT, str(critical_pct))
+
+
 def get_event_retention_days(db: Database, config: Config) -> int:
     raw = db.get_setting(SETTING_EVENT_RETENTION_DAYS)
     return int(raw) if raw is not None else config.event_retention_days

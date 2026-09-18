@@ -35,6 +35,7 @@ class Node:
     capture_dns_running: bool | None
     last_send_error: str | None
     last_send_success_at: datetime | None
+    buffer_alert_level: str | None  # None | "warning" | "critical"
 
     def is_online(self, offline_after_seconds: int, now: datetime) -> bool:
         if self.status != "active" or self.last_heartbeat_at is None:

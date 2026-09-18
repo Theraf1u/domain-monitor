@@ -192,6 +192,11 @@ class Database:
             )
             self._conn.commit()
 
+    def set_node_buffer_alert_level(self, node_id: int, level: str | None) -> None:
+        with self._lock:
+            self._conn.execute("UPDATE nodes SET buffer_alert_level = ? WHERE id = ?", (level, node_id))
+            self._conn.commit()
+
     def set_node_sending(self, node_id: int, enabled: bool) -> None:
         with self._lock:
             self._conn.execute(
@@ -309,6 +314,7 @@ class Database:
             capture_dns_running=None if row["capture_dns_running"] is None else bool(row["capture_dns_running"]),
             last_send_error=row["last_send_error"],
             last_send_success_at=_parse_ts(row["last_send_success_at"]),
+            buffer_alert_level=row["buffer_alert_level"],
         )
 
     # ------------------------------------------------------------------
