@@ -1,6 +1,9 @@
 services:
   server:
-    build: .
+    build:
+      context: .
+      args:
+        GIT_REV: ${GIT_REV:-unknown}
     image: domain-monitor-server:latest
     container_name: domain-monitor-server
     restart: unless-stopped

@@ -12,6 +12,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ app/
 COPY migrations/ migrations/
 
+# Baked in at build time from the host's git state (see docker-compose.yml/
+# install.sh/update.sh, which export GIT_REV before `compose build`) -
+# .git itself isn't in the build context, so this is the only way "О
+# системе" can show a real revision instead of guessing. Falls back to
+# "unknown" for a build that didn't set it, which is honest, not fake.
+ARG GIT_REV=unknown
+RUN echo "$GIT_REV" > app/GIT_REV
+
 RUN mkdir -p /data
 VOLUME ["/data"]
 

@@ -82,6 +82,20 @@ class Database:
                 )
                 self._conn.commit()
 
+    def integrity_check(self) -> bool:
+        with self._lock:
+            cur = self._conn.execute("PRAGMA integrity_check")
+            return cur.fetchone()[0] == "ok"
+
+    def applied_migrations_count(self) -> int:
+        """Doubles as a "DB schema version" for the "ℹ️ О системе" screen -
+        there's no single integer schema version anywhere else, but the
+        count of applied migration files is an honest, always-available
+        stand-in for it."""
+        with self._lock:
+            cur = self._conn.execute("SELECT COUNT(*) FROM schema_migrations")
+            return cur.fetchone()[0]
+
     # ------------------------------------------------------------------
     # Nodes
     # ------------------------------------------------------------------

@@ -1,4 +1,11 @@
-"""Keyboards for the "⚙️ Настройки" section."""
+"""Keyboards for the "⚙️ Настройки" section (spec 2.0 Part 2, section 1):
+a hub screen linking to Сервер/Ноды по умолчанию/Часовой пояс/Хранение
+данных/Администраторы/Безопасность/Диагностика/О системе. Docker-UFW/
+Обновления/Миграция aren't linked from the hub yet - those are still-
+pending later stages (6/7 in the spec's own execution order); adding a
+button that opens nothing real would be exactly the "no dead screens, no
+fake functions" rule this whole project has followed.
+"""
 from __future__ import annotations
 
 from aiogram.types import InlineKeyboardMarkup
@@ -7,17 +14,99 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from app.telegram.keyboards.common import _toggle_label, _toggle_style
 
 
-def settings_menu(
-    retention_days: int, offline_seconds: int, watchlist_enabled: bool, timezone_label: str = "UTC",
-    buffer_thresholds_label: str = "70%/90%",
-) -> InlineKeyboardMarkup:
+def settings_menu(watchlist_enabled: bool) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    b.button(text=f"🗓 Хранение событий: {retention_days} дн.", callback_data="settings_retention", style="primary")
-    b.button(text=f"⏱ Offline через: {offline_seconds} сек", callback_data="settings_offline", style="primary")
-    b.button(text=f"🌍 Часовой пояс: {timezone_label}", callback_data="settings_timezone", style="primary")
-    b.button(text=f"📦 Пороги буфера: {buffer_thresholds_label}", callback_data="settings_buffer", style="primary")
+    b.button(text="🖥 Сервер", callback_data="settings_server", style="primary")
+    b.button(text="📡 Ноды по умолчанию", callback_data="settings_node_defaults", style="primary")
+    b.button(text="🌍 Часовой пояс", callback_data="settings_timezone", style="primary")
+    b.button(text="🗄 Хранение данных", callback_data="settings_retention_menu", style="primary")
+    b.button(text="👥 Администраторы", callback_data="settings_admins", style="primary")
+    b.button(text="🔐 Безопасность", callback_data="settings_security", style="primary")
+    b.button(text="🩺 Диагностика", callback_data="settings_diagnostics", style="primary")
+    b.button(text="ℹ️ О системе", callback_data="settings_about", style="primary")
     wl_label = _toggle_label("Watch-уведомления включены", "Watch-уведомления выключены", watchlist_enabled)
     b.button(text=wl_label, callback_data="settings_toggle_watchlist", style=_toggle_style(watchlist_enabled))
     b.button(text="⬅️ Назад", callback_data="main")
-    b.adjust(1, 1, 1, 1, 1, 1)
+    b.adjust(1, 1, 1, 1, 1, 1, 1, 1, 1, 1)
+    return b.as_markup()
+
+
+def settings_node_defaults_menu(offline_seconds: int, buffer_thresholds_label: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text=f"⏱ Offline через: {offline_seconds} сек", callback_data="settings_offline", style="primary")
+    b.button(text=f"📦 Пороги буфера: {buffer_thresholds_label}", callback_data="settings_buffer", style="primary")
+    b.button(text="⬅️ Назад", callback_data="settings")
+    b.adjust(1, 1, 1)
+    return b.as_markup()
+
+
+OFFLINE_PRESETS: list[tuple[int, str]] = [
+    (30, "30 сек"), (60, "1 мин"), (120, "2 мин"), (300, "5 мин"), (600, "10 мин"),
+]
+
+
+def settings_offline_menu(current: int) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for value, label in OFFLINE_PRESETS:
+        prefix = "✅ " if value == current else ""
+        b.button(text=f"{prefix}{label}", callback_data=f"settings_offline_set:{value}")
+    is_custom = current not in {v for v, _ in OFFLINE_PRESETS}
+    custom_label = f"✅ Свой ({current} сек)" if is_custom else "✏️ Своё значение"
+    b.button(text=custom_label, callback_data="settings_offline_custom", style="primary")
+    b.button(text="⬅️ Назад", callback_data="settings_node_defaults")
+    b.adjust(2, 2, 1, 1, 1)
+    return b.as_markup()
+
+
+RETENTION_PRESETS: list[tuple[int, str]] = [
+    (0, "Всегда"), (7, "7 дней"), (30, "30 дней"), (90, "90 дней"), (180, "180 дней"), (365, "365 дней"),
+]
+
+
+def settings_retention_menu(current: int) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for value, label in RETENTION_PRESETS:
+        prefix = "✅ " if value == current else ""
+        b.button(text=f"{prefix}{label}", callback_data=f"settings_retention_set:{value}")
+    is_custom = current not in {v for v, _ in RETENTION_PRESETS}
+    custom_label = f"✅ Своё ({current} дн.)" if is_custom else "✏️ Своё значение"
+    b.button(text=custom_label, callback_data="settings_retention_custom", style="primary")
+    b.button(text="⬅️ Назад", callback_data="settings")
+    b.adjust(2, 2, 2, 1, 1)
+    return b.as_markup()
+
+
+def settings_admins_menu() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="⬅️ Назад", callback_data="settings")
+    b.adjust(1)
+    return b.as_markup()
+
+
+def settings_security_menu() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="⬅️ Назад", callback_data="settings")
+    b.adjust(1)
+    return b.as_markup()
+
+
+def settings_diagnostics_menu() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="🩺 Запустить диагностику", callback_data="settings_diagnostics_run", style="primary")
+    b.button(text="⬅️ Назад", callback_data="settings")
+    b.adjust(1, 1)
+    return b.as_markup()
+
+
+def settings_about_menu() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="⬅️ Назад", callback_data="settings")
+    b.adjust(1)
+    return b.as_markup()
+
+
+def settings_server_menu() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="⬅️ Назад", callback_data="settings")
+    b.adjust(1)
     return b.as_markup()
