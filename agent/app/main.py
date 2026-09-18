@@ -28,7 +28,7 @@ async def _run() -> None:
 
     remote_control = RemoteControl()
     sniffer = Sniffer(buffer, config.interface, config.tshark_path, config.sources, remote_control)
-    uplink = UplinkTask(config, buffer, remote_control)
+    uplink = UplinkTask(config, buffer, remote_control, sniffer=sniffer)
 
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()

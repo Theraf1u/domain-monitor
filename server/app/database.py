@@ -217,16 +217,43 @@ class Database:
     def touch_heartbeat(
         self, node_id: int, version: str | None = None, ip: str | None = None,
         hostname: str | None = None, buffer_size: int | None = None,
+        agent_uptime_seconds: int | None = None, buffer_bytes: int | None = None,
+        buffer_limit_bytes: int | None = None, dropped_events_total: int | None = None,
+        capture_tls_running: bool | None = None, capture_dns_running: bool | None = None,
+        last_send_error: str | None = None, last_send_success_at: datetime | None = None,
     ) -> None:
         with self._lock:
             now = _now()
             if version is not None or ip is not None or hostname is not None or buffer_size is not None:
+                success_str = _fmt_ts(last_send_success_at) if last_send_success_at else None
                 self._conn.execute(
                     "UPDATE nodes SET last_heartbeat_at = ?, last_seen_at = ?, "
                     "version = COALESCE(?, version), ip = COALESCE(?, ip), "
                     "hostname = COALESCE(?, hostname), "
-                    "agent_buffer_size = COALESCE(?, agent_buffer_size) WHERE id = ?",
-                    (now, now, version, ip, hostname, buffer_size, node_id),
+                    "agent_buffer_size = COALESCE(?, agent_buffer_size), "
+                    # These come from a new-enough agent on every single
+                    # heartbeat (never conditionally omitted), so they're
+                    # always overwritten with the fresh value - including
+                    # None, which is how last_send_error gets cleared back
+                    # to "no error" the moment a batch succeeds again. An
+                    # old agent that never sends them just leaves these
+                    # columns NULL forever, which is the honest answer
+                    # ("unknown"), not a regression.
+                    "agent_uptime_seconds = ?, buffer_bytes = ?, buffer_limit_bytes = ?, "
+                    "dropped_events_total = ?, capture_tls_running = ?, capture_dns_running = ?, "
+                    "last_send_error = ?, "
+                    # ...except this one, which should only ever move
+                    # forward - a heartbeat with no fresh success shouldn't
+                    # erase the last time one actually happened.
+                    "last_send_success_at = COALESCE(?, last_send_success_at) "
+                    "WHERE id = ?",
+                    (
+                        now, now, version, ip, hostname, buffer_size,
+                        agent_uptime_seconds, buffer_bytes, buffer_limit_bytes, dropped_events_total,
+                        None if capture_tls_running is None else int(capture_tls_running),
+                        None if capture_dns_running is None else int(capture_dns_running),
+                        last_send_error, success_str, node_id,
+                    ),
                 )
             else:
                 self._conn.execute(
@@ -274,6 +301,14 @@ class Database:
             notify_group_topic_id=row["notify_group_topic_id"],
             agent_buffer_size=row["agent_buffer_size"],
             last_known_online=None if row["last_known_online"] is None else bool(row["last_known_online"]),
+            agent_uptime_seconds=row["agent_uptime_seconds"],
+            buffer_bytes=row["buffer_bytes"],
+            buffer_limit_bytes=row["buffer_limit_bytes"],
+            dropped_events_total=row["dropped_events_total"],
+            capture_tls_running=None if row["capture_tls_running"] is None else bool(row["capture_tls_running"]),
+            capture_dns_running=None if row["capture_dns_running"] is None else bool(row["capture_dns_running"]),
+            last_send_error=row["last_send_error"],
+            last_send_success_at=_parse_ts(row["last_send_success_at"]),
         )
 
     # ------------------------------------------------------------------

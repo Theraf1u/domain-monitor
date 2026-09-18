@@ -80,6 +80,18 @@ class HeartbeatRequest(BaseModel):
     ip: str | None = None
     hostname: str | None = None
     buffer_size: int | None = None
+    # Everything below is optional and additive - an older agent that
+    # doesn't send these yet is a perfectly valid heartbeat, and
+    # touch_heartbeat()'s COALESCE-based update leaves the stored value
+    # untouched when a field is absent, same as the original four.
+    agent_uptime_seconds: int | None = None
+    buffer_bytes: int | None = None
+    buffer_limit_bytes: int | None = None
+    dropped_events_total: int | None = None
+    capture_tls_running: bool | None = None
+    capture_dns_running: bool | None = None
+    last_send_error: str | None = None
+    last_send_success_at: datetime | None = None
 
 
 class HeartbeatResponse(BaseModel):

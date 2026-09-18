@@ -27,6 +27,14 @@ class Node:
     notify_group_topic_id: int | None
     agent_buffer_size: int | None
     last_known_online: bool | None
+    agent_uptime_seconds: int | None
+    buffer_bytes: int | None
+    buffer_limit_bytes: int | None
+    dropped_events_total: int | None
+    capture_tls_running: bool | None
+    capture_dns_running: bool | None
+    last_send_error: str | None
+    last_send_success_at: datetime | None
 
     def is_online(self, offline_after_seconds: int, now: datetime) -> bool:
         if self.status != "active" or self.last_heartbeat_at is None:

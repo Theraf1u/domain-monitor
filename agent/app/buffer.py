@@ -74,6 +74,10 @@ class Buffer:
         self._pending_hits = 0
         self._estimated_bytes = 0
         self._since_last_check = 0
+        # Since this process started, not persisted across restarts - a
+        # rough "is this node falling behind" signal for the heartbeat,
+        # not an audit trail.
+        self._dropped_total = 0
 
     def migrate(self) -> None:
         with self._lock:
@@ -159,6 +163,7 @@ class Buffer:
         self._row_count -= len(ids)
         self._pending_hits = max(0, self._pending_hits - freed_hits)
         self._estimated_bytes = max(0, self._estimated_bytes - freed_bytes)
+        self._dropped_total += freed_hits
         logger.warning(
             "Outbox over its %d MB budget, dropped %d least-recently-seen domain(s) "
             "(%d buffered hits) - server appears to be unreachable for a while",
@@ -201,6 +206,19 @@ class Buffer:
         what "buffered, not sent yet" meant before dedupe existed."""
         with self._lock:
             return self._pending_hits
+
+    def size_bytes(self) -> int:
+        """The estimated on-disk size backing the size cap - see the
+        module docstring for why this is an estimate, not a stat()."""
+        with self._lock:
+            return self._estimated_bytes
+
+    def dropped_total(self) -> int:
+        """How many buffered hits have been evicted for being over the
+        size cap since this process started (not persisted across
+        restarts - see the field's own comment in __init__)."""
+        with self._lock:
+            return self._dropped_total
 
     def close(self) -> None:
         with self._lock:

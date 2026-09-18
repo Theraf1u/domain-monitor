@@ -8,12 +8,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import socket
+import time
+from datetime import datetime, timezone
 
 import httpx
 
 from app.buffer import Buffer
 from app.config import Config
 from app.remote_control import RemoteControl
+from app.sniffer import Sniffer
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +24,25 @@ AGENT_VERSION = "1.0.0"
 
 _MAX_BACKOFF_SECONDS = 120
 
+# How long an error message can get before it's truncated for the
+# heartbeat - just enough for an operator to recognize what's wrong
+# (timeout vs. DNS failure vs. 5xx) without shipping a full traceback
+# off the node on every single heartbeat.
+_MAX_ERROR_LENGTH = 200
+
 
 class UplinkTask:
-    def __init__(self, config: Config, buffer: Buffer, remote_control: RemoteControl) -> None:
+    def __init__(
+        self, config: Config, buffer: Buffer, remote_control: RemoteControl, sniffer: Sniffer | None = None,
+    ) -> None:
         self.config = config
         self.buffer = buffer
         self.remote_control = remote_control
+        self.sniffer = sniffer
         self._stopped = asyncio.Event()
+        self._start_time = time.monotonic()
+        self._last_send_error: str | None = None
+        self._last_send_success_at: str | None = None
         self._client = httpx.AsyncClient(
             base_url=config.server_url,
             headers={"Authorization": f"Bearer {config.node_token}"},
@@ -84,13 +99,17 @@ class UplinkTask:
             resp = await self._client.post("/api/v1/events", json=payload)
             if resp.status_code == 403:
                 logger.error("Node token was revoked by the server - agent cannot send events anymore")
+                self._last_send_error = "403: node token revoked"
                 return None
             resp.raise_for_status()
         except httpx.HTTPError as exc:
             logger.warning("Failed to send %d event(s) to server: %s", len(batch), exc)
+            self._last_send_error = str(exc)[:_MAX_ERROR_LENGTH]
             return None
 
         self.buffer.delete_ids([e.id for e in batch])
+        self._last_send_error = None
+        self._last_send_success_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         logger.debug("Sent %d event(s) to server", len(batch))
         return len(batch)
 
@@ -104,7 +123,23 @@ class UplinkTask:
             # the agent keeps capturing locally the whole time, this is
             # the only way the server can see that it's happening.
             "buffer_size": self.buffer.size(),
+            # Everything below is optional/additive on the server side -
+            # an older server that doesn't know these fields yet just
+            # ignores them (FastAPI/Pydantic drops unknown keys by
+            # default), so this never breaks talking to an old server.
+            "agent_uptime_seconds": int(time.monotonic() - self._start_time),
+            "buffer_bytes": self.buffer.size_bytes(),
+            "buffer_limit_bytes": self.config.max_buffer_bytes,
+            "dropped_events_total": self.buffer.dropped_total(),
+            "last_send_error": self._last_send_error,
+            "last_send_success_at": self._last_send_success_at,
         }
+        if self.sniffer is not None:
+            status = self.sniffer.capture_status()
+            if "tls_sni" in status:
+                payload["capture_tls_running"] = status["tls_sni"]
+            if "dns" in status:
+                payload["capture_dns_running"] = status["dns"]
         try:
             resp = await self._client.post("/api/v1/nodes/heartbeat", json=payload)
             resp.raise_for_status()

@@ -137,6 +137,15 @@ class _SourceWorker:
         self._stopped.set()
         await self._terminate_process()
 
+    @property
+    def is_capturing(self) -> bool:
+        """True while a live tshark process is actually running for this
+        source - false while paused from Telegram, mid-restart, or
+        crash-backoff. Reported in the heartbeat so the bot can show
+        "capture stalled" instead of inferring it indirectly from
+        buffer growth."""
+        return self._process is not None and self._process.returncode is None
+
     async def _terminate_process(self) -> None:
         if self._process and self._process.returncode is None:
             self._process.terminate()
@@ -237,3 +246,10 @@ class Sniffer:
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
+
+    def capture_status(self) -> dict[str, bool]:
+        """{"tls_sni": True, "dns": False, ...} for whichever sources are
+        actually enabled on this agent - a source that was never enabled
+        just doesn't appear, rather than reporting a fake False for a
+        capability this agent was never asked to provide."""
+        return {w.spec.name: w.is_capturing for w in self._workers}
