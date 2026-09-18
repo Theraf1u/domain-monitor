@@ -48,6 +48,7 @@ class Inputs(StatesGroup):
     waiting_for_node_rename = State()
     waiting_for_node_search = State()
     waiting_for_filter_pattern = State()
+    waiting_for_filter_comment = State()
     waiting_for_filter_check = State()
     waiting_for_export_range = State()
     waiting_for_custom_batch_seconds = State()
@@ -1074,6 +1075,89 @@ async def cb_filters_list(call: CallbackQuery, db: Database) -> None:
     text = title if rules else f"{title}\n\nПусто"
     await call.message.edit_text(text, reply_markup=kb.filters_list(list_type, rules, page))
     await call.answer()
+
+
+def _find_rule(db: Database, rule_id: int):
+    return next((r for r in db.list_filter_rules() if r.id == rule_id), None)
+
+
+def _build_filter_rule_text(rule) -> str:
+    tag = kb.PATTERN_TAG.get(rule.pattern_type, rule.pattern_type)
+    list_label = {"watch": "🚨 Watch", "ignore": "🚫 Ignore", "allow": "✅ Allow"}.get(rule.list_type, rule.list_type)
+    lines = [
+        f"{list_label} · <code>{html.escape(rule.pattern)}</code> ({tag})",
+        "",
+        f"Статус: {'🟢 включено' if rule.enabled else '🔴 выключено'}",
+        f"Сработало раз: {rule.hits_count}",
+        f"Последнее срабатывание: {format_relative_time(rule.last_hit_at)}",
+        f"Комментарий: {html.escape(rule.comment) if rule.comment else '—'}",
+    ]
+    return "\n".join(lines)
+
+
+@router.callback_query(F.data.startswith("filter_rule:"))
+async def cb_filter_rule(call: CallbackQuery, db: Database) -> None:
+    _, rule_id_raw, page_raw = call.data.split(":")
+    rule = _find_rule(db, int(rule_id_raw))
+    if rule is None:
+        await call.answer("Правило не найдено", show_alert=True)
+        return
+    await call.message.edit_text(
+        _build_filter_rule_text(rule), parse_mode="HTML", reply_markup=kb.filter_rule_card(rule, int(page_raw)),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("filter_toggle:"))
+async def cb_filter_toggle(call: CallbackQuery, db: Database) -> None:
+    _, rule_id_raw, page_raw = call.data.split(":")
+    rule = _find_rule(db, int(rule_id_raw))
+    if rule is None:
+        await call.answer("Правило не найдено", show_alert=True)
+        return
+    db.set_filter_rule_enabled(rule.id, not rule.enabled)
+    rule = _find_rule(db, rule.id)
+    await call.message.edit_text(
+        _build_filter_rule_text(rule), parse_mode="HTML", reply_markup=kb.filter_rule_card(rule, int(page_raw)),
+    )
+    await call.answer("Включено" if rule.enabled else "Выключено")
+
+
+@router.callback_query(F.data.startswith("filter_comment:"))
+async def cb_filter_comment_prompt(call: CallbackQuery, state: FSMContext, db: Database) -> None:
+    _, rule_id_raw, page_raw = call.data.split(":")
+    rule = _find_rule(db, int(rule_id_raw))
+    if rule is None:
+        await call.answer("Правило не найдено", show_alert=True)
+        return
+    await state.set_state(Inputs.waiting_for_filter_comment)
+    await state.update_data(filter_rule_id=rule.id, filter_rule_page=int(page_raw))
+    await call.message.edit_text(
+        "Введите комментарий к правилу (например, зачем оно нужно). "
+        "Отправьте «-», чтобы очистить существующий комментарий.",
+        reply_markup=kb.cancel_input(f"filter_rule:{rule.id}:{page_raw}"),
+    )
+    await call.answer()
+
+
+@router.message(Inputs.waiting_for_filter_comment)
+async def on_filter_comment_input(message: Message, state: FSMContext, db: Database) -> None:
+    data = await state.get_data()
+    rule_id, page = data.get("filter_rule_id"), data.get("filter_rule_page", 0)
+    await state.set_state(None)
+    if rule_id is None:
+        await message.answer("Сессия истекла. Откройте меню фильтров и попробуйте снова.", reply_markup=kb.back_button("filters"))
+        return
+    text = (message.text or "").strip()
+    comment = None if text == "-" else text
+    db.set_filter_rule_comment(rule_id, comment)
+    rule = _find_rule(db, rule_id)
+    if rule is None:
+        await message.answer("Правило больше не существует.", reply_markup=kb.back_button("filters"))
+        return
+    await message.answer(
+        _build_filter_rule_text(rule), parse_mode="HTML", reply_markup=kb.filter_rule_card(rule, page),
+    )
 
 
 @router.callback_query(F.data.startswith("filter_remove_confirm:"))

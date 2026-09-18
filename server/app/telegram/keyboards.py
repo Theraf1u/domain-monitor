@@ -395,7 +395,11 @@ def filters_list(list_type: str, rules: list[FilterRule], page: int = 0, page_si
     page_rules = rules[start:start + page_size]
     for r in page_rules:
         tag = PATTERN_TAG.get(r.pattern_type, r.pattern_type)
-        b.button(text=f"🗑 {r.pattern} ({tag})", callback_data=f"filter_remove_confirm:{r.id}:{page}", style="danger")
+        prefix = "" if r.enabled else "🚫 "
+        b.button(
+            text=f"{prefix}{r.pattern} ({tag}) · {r.hits_count}",
+            callback_data=f"filter_rule:{r.id}:{page}", style=_toggle_style(r.enabled),
+        )
     rows = [1] * len(page_rules)
 
     if len(rules) > page_size:  # only clutter the screen with pagination if there's more than one page
@@ -405,6 +409,20 @@ def filters_list(list_type: str, rules: list[FilterRule], page: int = 0, page_si
     b.button(text="⬅️ Назад", callback_data="filters")
     rows.append(1)
     b.adjust(*rows)
+    return b.as_markup()
+
+
+def filter_rule_card(rule: FilterRule, page: int) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    toggle_label = _toggle_label("Включено", "Выключено", rule.enabled)
+    b.button(
+        text=toggle_label, callback_data=f"filter_toggle:{rule.id}:{page}", style=_toggle_style(rule.enabled),
+    )
+    comment_label = "✏️ Изменить комментарий" if rule.comment else "✏️ Добавить комментарий"
+    b.button(text=comment_label, callback_data=f"filter_comment:{rule.id}:{page}", style="primary")
+    b.button(text="🗑 Удалить", callback_data=f"filter_remove_confirm:{rule.id}:{page}", style="danger")
+    b.button(text="⬅️ К списку", callback_data=f"filters_list:{rule.list_type}:{page}")
+    b.adjust(1)
     return b.as_markup()
 
 
