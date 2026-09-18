@@ -116,6 +116,18 @@ install_dm_command() {
     mv -f "$tmp" "$DM_COMMAND"
 }
 
+# Bootstraps Docker + Compose on a completely clean box (spec 2.0 Part 2,
+# section 4 / DoD 18: "curl ... | sudo bash" on Ubuntu/Debian with neither
+# installed must just work). detect_compose()/ensure_docker() are
+# idempotent - already-installed Docker/Compose is left exactly alone, so
+# this is safe to call on every run, not just a first install.
+ensure_bootstrap_deps() {
+    # shellcheck source=server/scripts/lib.sh
+    source "$PROJECT_DIR/server/scripts/lib.sh"
+    ensure_docker || { echo "Docker обязателен для работы Domain Monitor - установи вручную и запусти установщик снова." >&2; exit 1; }
+    detect_compose >/dev/null || { echo "Docker Compose обязателен для работы Domain Monitor - установи вручную и запусти установщик снова." >&2; exit 1; }
+}
+
 component_status() {
     # $1 = server|agent -> prints a short colored status string
     local component="$1" name="domain-monitor-${1}"
@@ -565,10 +577,12 @@ main() {
     # doesn't have to answer anything, just paste and run.
     if [ "${1:-}" = "agent" ] && [ -n "${2:-}" ] && [ -n "${3:-}" ]; then
         resolve_project_dir
+        ensure_bootstrap_deps
         install_dm_command
         exec bash "$PROJECT_DIR/agent/install-agent.sh" "$2" "$3"
     fi
     resolve_project_dir
+    ensure_bootstrap_deps
     install_dm_command
     show_menu
 }

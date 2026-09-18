@@ -12,6 +12,70 @@ have_compose() {
     fi
 }
 
+# detect_compose()/ensure_docker() (spec 2.0 Part 2, sections 4.1/4.2) -
+# identical to the server's copy in server/scripts/lib.sh (kept in sync
+# by hand, same as have_compose()/compose()/compose_build_quiet() already
+# were). No UFW helpers here on purpose: the agent makes only outbound
+# connections to the server and never needs an inbound firewall rule of
+# its own (spec 5.5), so there's nothing for it to open/close.
+detect_compose() {
+    local mode
+    mode="$(have_compose)"
+    if [ "$mode" != "none" ]; then
+        echo "$mode"
+        return 0
+    fi
+    echo "[*] Docker Compose не найден - пробую поставить плагин 'docker compose'..." >&2
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get update -qq >/dev/null 2>&1
+        apt-get install -y -qq docker-compose-plugin >/dev/null 2>&1 || true
+    fi
+    mode="$(have_compose)"
+    if [ "$mode" != "none" ]; then
+        echo "$mode"
+        return 0
+    fi
+    echo "Docker Compose недоступен и автоустановка плагина не удалась. Поставь вручную: https://docs.docker.com/compose/install/" >&2
+    echo "none"
+    return 1
+}
+
+ensure_docker() {
+    if command -v docker >/dev/null 2>&1; then
+        if docker info >/dev/null 2>&1; then
+            echo "[*] Docker уже установлен и запущен."
+            return 0
+        fi
+        echo "[*] Docker установлен, но демон не отвечает - пробую запустить через systemd..." >&2
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl enable --now docker >/dev/null 2>&1 || true
+        fi
+        if docker info >/dev/null 2>&1; then
+            echo "[*] Docker демон запущен."
+            return 0
+        fi
+        echo "Docker установлен, но демон не запускается. Проверь вручную: systemctl status docker" >&2
+        return 1
+    fi
+
+    if ! command -v apt-get >/dev/null 2>&1; then
+        echo "Docker не найден, а автоустановка поддерживается только для Debian/Ubuntu (apt-get). Поставь Docker вручную: https://docs.docker.com/engine/install/" >&2
+        return 1
+    fi
+    echo "[*] Docker не найден - устанавливаю (docker.io + плагин compose)..." >&2
+    apt-get update -qq
+    apt-get install -y -qq docker.io docker-compose-plugin
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl enable --now docker >/dev/null 2>&1 || true
+    fi
+    if docker info >/dev/null 2>&1; then
+        echo "[*] Docker установлен и запущен."
+        return 0
+    fi
+    echo "Установка Docker завершилась, но демон не отвечает - смотри: systemctl status docker" >&2
+    return 1
+}
+
 compose() {
     case "$(have_compose)" in
         plugin) docker compose "$@" ;;

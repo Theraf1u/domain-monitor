@@ -11,20 +11,38 @@ FAILED=0
 
 ok()   { echo "✓ $1"; }
 fail() { echo "✗ $1"; [ -n "${2:-}" ] && echo "  -> $2"; FAILED=1; }
+category() { echo; echo "── $1 ──"; }
 
-# Docker
+# ------------------------------------------------------------------
+# DOCKER
+# ------------------------------------------------------------------
+category "DOCKER"
+
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-    ok "Docker установлен и запущен"
+    engine_version="$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo '?')"
+    ok "Docker установлен и запущен (Engine $engine_version)"
 else
     fail "Docker недоступен/не запущен" "Установи Docker или запусти демон Docker."
 fi
 
-# Compose
-if [ "$(have_compose)" != "none" ]; then
-    ok "Docker Compose доступен"
+# Compose - reports which mode (plugin vs legacy standalone), per spec 4.5,
+# since the two have different upgrade paths and it's not obvious from
+# the outside which one a given box is actually running.
+compose_mode="$(have_compose)"
+if [ "$compose_mode" = "plugin" ]; then
+    compose_version="$(docker compose version --short 2>/dev/null || echo '?')"
+    ok "Docker Compose доступен (plugin, v$compose_version)"
+elif [ "$compose_mode" = "standalone" ]; then
+    compose_version="$(docker-compose version --short 2>/dev/null || echo '?')"
+    ok "Docker Compose доступен (legacy docker-compose, v$compose_version)"
 else
     fail "Docker Compose не найден" "Установи плагин 'docker compose' или 'docker-compose'."
 fi
+
+# ------------------------------------------------------------------
+# SECURITY
+# ------------------------------------------------------------------
+category "SECURITY"
 
 # .env
 if [ -f "$ENV_FILE" ]; then
@@ -34,9 +52,34 @@ if [ -f "$ENV_FILE" ]; then
     else
         fail "ADMIN_API_KEY пуст/отсутствует в .env" "Запусти установщик заново или задай вручную."
     fi
+    env_perms="$(stat -c '%a' "$ENV_FILE" 2>/dev/null || echo '')"
+    if [ -n "$env_perms" ]; then
+        case "$env_perms" in
+            *00) ok ".env недоступен для чтения другим пользователям (права $env_perms)" ;;
+            *)   fail ".env доступен для чтения не только владельцу (права $env_perms)" \
+                    "chmod 600 $ENV_FILE - там секреты (BOT_TOKEN, ADMIN_API_KEY)." ;;
+        esac
+    fi
 else
     fail ".env не найден по пути $ENV_FILE" "Запусти install.sh, чтобы его создать."
 fi
+
+# Backup archives, if any exist, should be similarly locked down (spec 9:
+# "проверить права ... backup archives").
+BACKUP_DIR="$PROJECT_DIR/data/backups"
+if [ -d "$BACKUP_DIR" ]; then
+    world_readable_backups="$(find "$BACKUP_DIR" -maxdepth 1 -name '*.tar.gz' -perm -044 2>/dev/null | wc -l)"
+    if [ "${world_readable_backups:-0}" -eq 0 ]; then
+        ok "Файлы бэкапов не читаются другими пользователями"
+    else
+        fail "$world_readable_backups файл(ов) бэкапа доступны для чтения не только владельцу" "chmod 600 $BACKUP_DIR/*.tar.gz"
+    fi
+fi
+
+# ------------------------------------------------------------------
+# SERVER
+# ------------------------------------------------------------------
+category "SERVER"
 
 # Container
 if docker inspect domain-monitor-server >/dev/null 2>&1; then
@@ -55,6 +98,29 @@ if docker inspect domain-monitor-server >/dev/null 2>&1; then
 else
     fail "Контейнер 'domain-monitor-server' не существует" "Запусти install.sh."
 fi
+
+# Database
+DB_FILE="$PROJECT_DIR/data/domain_monitor.db"
+if [ -f "$DB_FILE" ]; then
+    if command -v sqlite3 >/dev/null 2>&1; then
+        if sqlite3 "$DB_FILE" "PRAGMA integrity_check;" 2>/dev/null | grep -q "^ok$"; then
+            ok "Проверка целостности БД пройдена"
+        else
+            fail "Проверка целостности БД провалена" "Рассмотри восстановление из бэкапа: domain-monitor-server restore"
+        fi
+        applied="$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM schema_migrations;" 2>/dev/null || echo 0)"
+        ok "Применено миграций: $applied"
+    else
+        ok "Файл БД существует (sqlite3 CLI не установлен на хосте, проверка целостности пропущена)"
+    fi
+else
+    fail "Файл БД не найден по пути $DB_FILE" "Создаётся при первом запуске; если долго отсутствует - смотри логи контейнера."
+fi
+
+# ------------------------------------------------------------------
+# NETWORK
+# ------------------------------------------------------------------
+category "NETWORK"
 
 # HTTP reachability
 PORT="$(grep -oP '^PORT=\K.*' "$ENV_FILE" 2>/dev/null || echo 8280)"
@@ -88,23 +154,7 @@ if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "^Status: 
     fi
 fi
 
-# Database
-DB_FILE="$PROJECT_DIR/data/domain_monitor.db"
-if [ -f "$DB_FILE" ]; then
-    if command -v sqlite3 >/dev/null 2>&1; then
-        if sqlite3 "$DB_FILE" "PRAGMA integrity_check;" 2>/dev/null | grep -q "^ok$"; then
-            ok "Проверка целостности БД пройдена"
-        else
-            fail "Проверка целостности БД провалена" "Рассмотри восстановление из бэкапа: domain-monitor-server restore"
-        fi
-        applied="$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM schema_migrations;" 2>/dev/null || echo 0)"
-        ok "Применено миграций: $applied"
-    else
-        ok "Файл БД существует (sqlite3 CLI не установлен на хосте, проверка целостности пропущена)"
-    fi
-else
-    fail "Файл БД не найден по пути $DB_FILE" "Создаётся при первом запуске; если долго отсутствует - смотри логи контейнера."
-fi
+category "TELEGRAM"
 
 # Telegram - the only management interface, so this is a hard requirement.
 if grep -q '^BOT_TOKEN=.\+' "$ENV_FILE" 2>/dev/null; then
@@ -121,6 +171,8 @@ if grep -q '^BOT_TOKEN=.\+' "$ENV_FILE" 2>/dev/null; then
 else
     fail "BOT_TOKEN не задан в .env" "Telegram - единственный способ управления. Запусти install.sh заново или задай BOT_TOKEN/ADMIN_ID вручную."
 fi
+
+category "SYSTEM"
 
 # Disk space
 AVAIL_KB="$(df -Pk "$PROJECT_DIR" | awk 'NR==2 {print $4}')"
