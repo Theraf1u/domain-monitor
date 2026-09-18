@@ -4,6 +4,7 @@ keyboards" rule carried over from the single-node MVP.
 """
 from __future__ import annotations
 
+import html
 import logging
 import os
 import socket
@@ -24,7 +25,7 @@ from app.live_view import LiveViewManager
 from app.notifier import Notifier
 from app.security import generate_node_token, hash_token
 from app.telegram import keyboards as kb
-from app.telegram.formatters import format_bytes, format_relative_time
+from app.telegram.formatters import format_bytes, format_duration, format_relative_time
 from app.topic_binding import TopicBindingManager
 
 logger = logging.getLogger(__name__)
@@ -189,12 +190,36 @@ async def cb_node_card(call: CallbackQuery, db: Database, config: Config) -> Non
 
     domains = db.list_domains(limit=1000, node_id=node.id)
 
+    uptime_line = ""
+    if node.agent_uptime_seconds is not None:
+        uptime_line = f"Uptime агента: {format_duration(node.agent_uptime_seconds)}\n"
+
     buffer_line = ""
-    if node.agent_buffer_size:
+    if node.buffer_bytes is not None and node.buffer_limit_bytes:
+        buffer_line = (
+            f"\n📦 Буфер: {node.agent_buffer_size or 0} событий, "
+            f"{format_bytes(node.buffer_bytes)} / {format_bytes(node.buffer_limit_bytes)}"
+        )
+    elif node.agent_buffer_size:
+        # Older agent that reports buffer_size but not the byte-level
+        # telemetry yet - show what we actually know, nothing invented.
         buffer_line = (
             f"\n📦 В локальном буфере агента: {node.agent_buffer_size} "
             f"(накоплено, ждёт отправки на сервер)"
         )
+
+    sources_line = ""
+    if node.capture_tls_running is not None or node.capture_dns_running is not None:
+        parts = []
+        if node.capture_tls_running is not None:
+            parts.append(f"TLS SNI {'🟢' if node.capture_tls_running else '🔴'}")
+        if node.capture_dns_running is not None:
+            parts.append(f"DNS {'🟢' if node.capture_dns_running else '🔴'}")
+        sources_line = f"Источники: {', '.join(parts)}\n"
+
+    error_line = ""
+    if node.last_send_error:
+        error_line = f"\n⚠️ Ошибка последней отправки: {html.escape(node.last_send_error)}\n"
 
     dest_line = kb.NOTIFY_DEST_LABELS.get(node.notify_destination, node.notify_destination)
     if node.notify_destination in ("group", "both"):
@@ -210,9 +235,12 @@ async def cb_node_card(call: CallbackQuery, db: Database, config: Config) -> Non
         f"Последний heartbeat: {hb_line}\n"
         f"Версия агента: {node.version or '—'}\n"
         f"IP: {node.ip or '—'}\n"
-        f"Hostname: {node.hostname or '—'}\n\n"
+        f"Hostname: {node.hostname or '—'}\n"
+        f"{uptime_line}"
+        f"{sources_line}\n"
         f"Доменов с этой ноды: {len(domains)}"
-        f"{buffer_line}\n"
+        f"{buffer_line}"
+        f"{error_line}\n"
         f"Уведомления идут: {dest_line}"
     )
     await call.message.edit_text(text, parse_mode="HTML", reply_markup=kb.node_card(node))
