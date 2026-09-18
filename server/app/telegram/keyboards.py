@@ -93,6 +93,22 @@ def cancel_input(target: str = "main") -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
+def confirm_keyboard(
+    confirm_text: str, confirm_callback: str, cancel_callback: str, cancel_text: str = "❌ Отмена",
+) -> InlineKeyboardMarkup:
+    """Shared shape for every destructive-action confirmation screen: one
+    danger-styled confirm button, one success-styled cancel button,
+    single column. Per the module docstring's two-tier color rule, this
+    is a one-shot destructive action, not a toggle - the confirm button
+    stays `danger` regardless of what it confirms, and cancel is
+    `success` because backing out is the safe choice."""
+    b = InlineKeyboardBuilder()
+    b.button(text=confirm_text, callback_data=confirm_callback, style="danger")
+    b.button(text=cancel_text, callback_data=cancel_callback, style="success")
+    b.adjust(1)
+    return b.as_markup()
+
+
 # ------------------------------------------------------------------
 # Nodes
 # ------------------------------------------------------------------
@@ -165,11 +181,7 @@ def node_notify_dest_menu(node: Node) -> InlineKeyboardMarkup:
 
 
 def confirm_delete_node(node_id: int) -> InlineKeyboardMarkup:
-    b = InlineKeyboardBuilder()
-    b.button(text="✅ Да, удалить", callback_data=f"node_delete_confirm:{node_id}", style="danger")
-    b.button(text="❌ Отмена", callback_data=f"node:{node_id}", style="success")
-    b.adjust(1)
-    return b.as_markup()
+    return confirm_keyboard("✅ Да, удалить", f"node_delete_confirm:{node_id}", f"node:{node_id}")
 
 
 # ------------------------------------------------------------------
@@ -198,11 +210,7 @@ def export_period_menu() -> InlineKeyboardMarkup:
 
 
 def confirm_reset_data(back_target: str = "domains") -> InlineKeyboardMarkup:
-    b = InlineKeyboardBuilder()
-    b.button(text="✅ Да, сбросить всё", callback_data=f"data_reset_confirm:{back_target}", style="danger")
-    b.button(text="❌ Отмена", callback_data=back_target, style="success")
-    b.adjust(1)
-    return b.as_markup()
+    return confirm_keyboard("✅ Да, сбросить всё", f"data_reset_confirm:{back_target}", back_target)
 
 
 # ------------------------------------------------------------------
@@ -318,13 +326,11 @@ def filters_list(list_type: str, rules: list[FilterRule], page: int = 0, page_si
 
 
 def confirm_remove_filter(rule: FilterRule, page: int) -> InlineKeyboardMarkup:
-    b = InlineKeyboardBuilder()
-    b.button(
-        text="✅ Да, удалить", callback_data=f"filter_remove:{rule.id}:{rule.list_type}:{page}", style="danger",
+    return confirm_keyboard(
+        "✅ Да, удалить",
+        f"filter_remove:{rule.id}:{rule.list_type}:{page}",
+        f"filters_list:{rule.list_type}:{page}",
     )
-    b.button(text="❌ Отмена", callback_data=f"filters_list:{rule.list_type}:{page}", style="success")
-    b.adjust(1)
-    return b.as_markup()
 
 
 def filter_add_list_type() -> InlineKeyboardMarkup:
