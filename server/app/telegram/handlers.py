@@ -34,6 +34,14 @@ router = Router()
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
+@router.callback_query(F.data == "noop")
+async def cb_noop(call: CallbackQuery) -> None:
+    """The page-counter button in pagination rows (kb.add_pagination_row) -
+    not meant to do anything, but every callback still has to answer() or
+    the tap just spins forever on the user's end."""
+    await call.answer()
+
+
 class Inputs(StatesGroup):
     waiting_for_node_rename = State()
     waiting_for_filter_pattern = State()

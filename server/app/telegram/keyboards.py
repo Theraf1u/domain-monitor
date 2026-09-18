@@ -25,6 +25,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.models import FilterRule, Node
+from app.telegram.pagination import add_pagination_row
 
 
 def _toggle_style(enabled: bool) -> str:
@@ -306,14 +307,8 @@ def filters_list(list_type: str, rules: list[FilterRule], page: int = 0, page_si
         b.button(text=f"🗑 {r.pattern} ({tag})", callback_data=f"filter_remove_confirm:{r.id}:{page}", style="danger")
     rows = [1] * len(page_rules)
 
-    nav_buttons = 0
-    if page > 0:
-        b.button(text="⬅️ Пред.", callback_data=f"filters_list:{list_type}:{page - 1}")
-        nav_buttons += 1
-    if start + page_size < len(rules):
-        b.button(text="След. ➡️", callback_data=f"filters_list:{list_type}:{page + 1}")
-        nav_buttons += 1
-    if nav_buttons:
+    if len(rules) > page_size:  # only clutter the screen with pagination if there's more than one page
+        nav_buttons = add_pagination_row(b, page, page_size, len(rules), f"filters_list:{list_type}")
         rows.append(nav_buttons)
 
     b.button(text="⬅️ Назад", callback_data="filters")
