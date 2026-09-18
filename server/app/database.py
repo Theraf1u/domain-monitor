@@ -380,18 +380,23 @@ class Database:
             self._conn.execute("UPDATE domains SET ignored = ? WHERE id = ?", (int(ignored), domain_id))
             self._conn.commit()
 
-    def list_domains(
-        self, limit: int = 50, offset: int = 0, search: str | None = None,
-        order_by: str = "last_seen", node_id: int | None = None,
-        since: datetime | None = None, until: datetime | None = None,
-    ) -> list[Domain]:
-        order_col = {
-            "last_seen": "last_seen DESC",
-            "first_seen": "first_seen DESC",
-            "hits": "hits DESC",
-            "domain": "domain ASC",
-        }.get(order_by, "last_seen DESC")
-
+    def _domains_where(
+        self, search: str | None = None, node_id: int | None = None,
+        since: datetime | None = None, until: datetime | None = None, new_only: bool = False,
+        source: str | None = None, ignored: bool | None = None, min_hits: int | None = None,
+        list_status: str | None = None,
+    ) -> tuple[str, list[object]]:
+        """Shared WHERE-clause builder for list_domains()/count_domains() so
+        pagination totals and the page itself never drift apart. `since`/
+        `until` filter on first_seen when new_only is set (domains that
+        appeared in the window), otherwise on last_seen (domains active in
+        the window) - matches the "новые за период" vs "за период" distinction
+        in the spec. `list_status` in {"ignore", "allow", "watch"} matches
+        against enabled filter_rules of that list; wildcard patterns are
+        translated to SQL LIKE (fnmatch's `*`/`?` -> `%`/`_`), which is only
+        an approximation of fnmatch semantics but good enough for filtering
+        a list (classify_domain() remains the source of truth for a single
+        domain's actual verdict, e.g. on the domain card)."""
         clauses: list[str] = []
         params: list[object] = []
         if search:
@@ -400,14 +405,79 @@ class Database:
         if node_id is not None:
             clauses.append("node_id = ?")
             params.append(node_id)
+        ts_col = "first_seen" if new_only else "last_seen"
         if since is not None:
-            clauses.append("first_seen >= ?")
+            clauses.append(f"{ts_col} >= ?")
             params.append(_fmt_ts(since))
         if until is not None:
-            clauses.append("first_seen < ?")
+            clauses.append(f"{ts_col} < ?")
             params.append(_fmt_ts(until))
+        if source is not None:
+            clauses.append("EXISTS (SELECT 1 FROM events e WHERE e.domain = domains.domain AND e.source = ?)")
+            params.append(source)
+        if ignored is not None:
+            clauses.append("ignored = ?")
+            params.append(int(ignored))
+        if min_hits is not None:
+            clauses.append("hits >= ?")
+            params.append(min_hits)
+        if list_status in ("ignore", "allow", "watch"):
+            rule_sql, rule_params = self._filter_rules_sql(list_status)
+            if rule_sql is None:
+                clauses.append("0")  # no enabled rules of this type - nothing can match
+            else:
+                clauses.append(f"({rule_sql})")
+                params.extend(rule_params)
+        elif list_status == "none":
+            for lt in ("ignore", "allow", "watch"):
+                rule_sql, rule_params = self._filter_rules_sql(lt)
+                if rule_sql is not None:
+                    clauses.append(f"NOT ({rule_sql})")
+                    params.extend(rule_params)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        return where, params
 
+    def _filter_rules_sql(self, list_type: str) -> tuple[str | None, list[object]]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT pattern_type, pattern FROM filter_rules WHERE list_type = ? AND enabled = 1", (list_type,),
+            )
+            rules = cur.fetchall()
+        if not rules:
+            return None, []
+        parts: list[str] = []
+        params: list[object] = []
+        for r in rules:
+            ptype, pattern = r["pattern_type"], r["pattern"]
+            if ptype == "exact":
+                parts.append("domain = ?")
+                params.append(pattern)
+            elif ptype == "suffix":
+                parts.append("(domain = ? OR domain LIKE ?)")
+                params.extend([pattern, f"%.{pattern}"])
+            elif ptype == "wildcard":
+                like = pattern.replace("%", r"\%").replace("_", r"\_").replace("*", "%").replace("?", "_")
+                parts.append(r"domain LIKE ? ESCAPE '\'")
+                params.append(like)
+        return " OR ".join(parts), params
+
+    def list_domains(
+        self, limit: int = 50, offset: int = 0, search: str | None = None,
+        order_by: str = "last_seen", node_id: int | None = None,
+        since: datetime | None = None, until: datetime | None = None, new_only: bool = False,
+        source: str | None = None, ignored: bool | None = None, min_hits: int | None = None,
+        list_status: str | None = None,
+    ) -> list[Domain]:
+        order_col = {
+            "last_seen": "last_seen DESC",
+            "first_seen": "first_seen DESC",
+            "hits": "hits DESC",
+            "domain": "domain ASC",
+        }.get(order_by, "last_seen DESC")
+        where, params = self._domains_where(
+            search=search, node_id=node_id, since=since, until=until, new_only=new_only,
+            source=source, ignored=ignored, min_hits=min_hits, list_status=list_status,
+        )
         with self._lock:
             cur = self._conn.execute(
                 f"SELECT * FROM domains {where} ORDER BY {order_col} LIMIT ? OFFSET ?",
@@ -415,19 +485,71 @@ class Database:
             )
             return [self._row_to_domain(r) for r in cur.fetchall()]
 
-    def count_domains(self, since: datetime | None = None, until: datetime | None = None) -> int:
-        clauses: list[str] = []
-        params: list[object] = []
-        if since is not None:
-            clauses.append("first_seen >= ?")
-            params.append(_fmt_ts(since))
-        if until is not None:
-            clauses.append("first_seen < ?")
-            params.append(_fmt_ts(until))
-        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    def count_domains(
+        self, search: str | None = None, node_id: int | None = None,
+        since: datetime | None = None, until: datetime | None = None, new_only: bool = False,
+        source: str | None = None, ignored: bool | None = None, min_hits: int | None = None,
+        list_status: str | None = None,
+    ) -> int:
+        where, params = self._domains_where(
+            search=search, node_id=node_id, since=since, until=until, new_only=new_only,
+            source=source, ignored=ignored, min_hits=min_hits, list_status=list_status,
+        )
         with self._lock:
             cur = self._conn.execute(f"SELECT COUNT(*) FROM domains {where}", params)
             return cur.fetchone()[0]
+
+    def domain_node_distribution(self, domain: str, limit: int = 10) -> list[tuple[str, int]]:
+        """(node name, total hits) for a domain, from events - domains.node_id
+        alone only tells you who saw it *last*, not the full spread."""
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT n.name, SUM(e.hits) as c FROM events e JOIN nodes n ON n.id = e.node_id "
+                "WHERE e.domain = ? GROUP BY e.node_id ORDER BY c DESC LIMIT ?",
+                (domain, limit),
+            )
+            return [(r["name"], r["c"]) for r in cur.fetchall()]
+
+    def domain_source_distribution(self, domain: str) -> list[tuple[str, int]]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT source, SUM(hits) as c FROM events WHERE domain = ? GROUP BY source ORDER BY c DESC",
+                (domain,),
+            )
+            return [(r["source"], r["c"]) for r in cur.fetchall()]
+
+    def list_domain_events(self, domain: str, limit: int = 20, offset: int = 0) -> list[Event]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT * FROM events WHERE domain = ? ORDER BY occurred_at DESC LIMIT ? OFFSET ?",
+                (domain, limit, offset),
+            )
+            return [self._row_to_event(r) for r in cur.fetchall()]
+
+    def count_domain_events(self, domain: str) -> int:
+        with self._lock:
+            cur = self._conn.execute("SELECT COUNT(*) FROM events WHERE domain = ?", (domain,))
+            return cur.fetchone()[0]
+
+    def delete_events_only(self) -> int:
+        """Clears event history but keeps the domains table (and its
+        aggregate hit counts) intact - a lighter version of
+        reset_domains_and_events() for freeing disk without losing the
+        domain list itself."""
+        with self._lock:
+            cur = self._conn.execute("SELECT COUNT(*) FROM events")
+            count = cur.fetchone()[0]
+            self._conn.execute("DELETE FROM events")
+            self._conn.commit()
+            return count
+
+    @staticmethod
+    def _row_to_event(row: sqlite3.Row) -> Event:
+        return Event(
+            id=row["id"], node_id=row["node_id"], domain=row["domain"], source=row["source"],
+            occurred_at=_parse_ts(row["occurred_at"]), received_at=_parse_ts(row["received_at"]),
+            hits=row["hits"],
+        )
 
     def count_events_since(self, since: datetime, until: datetime | None = None) -> int:
         clauses = ["occurred_at >= ?"]

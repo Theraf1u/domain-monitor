@@ -62,6 +62,7 @@ class Event:
     source: str
     occurred_at: datetime
     received_at: datetime
+    hits: int
 
 
 @dataclass(frozen=True)
