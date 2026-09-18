@@ -202,6 +202,7 @@ def node_card(node: Node) -> InlineKeyboardMarkup:
     )
     dest_label = NOTIFY_DEST_LABELS.get(node.notify_destination, node.notify_destination)
     b.button(text=f"📍 Куда слать: {dest_label}", callback_data=f"node_notify_dest:{node.id}", style="primary")
+    b.button(text="🧪 Проверить", callback_data=f"node_check:{node.id}", style="primary")
     b.button(text="✏️ Переименовать", callback_data=f"node_rename:{node.id}", style="primary")
     if node.status == "active":
         b.button(text="🔑 Обновить токен", callback_data=f"node_regen:{node.id}", style="primary")

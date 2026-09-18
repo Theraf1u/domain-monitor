@@ -371,6 +371,96 @@ async def cb_node_card(call: CallbackQuery, db: Database, config: Config) -> Non
     await call.answer()
 
 
+def _build_node_check_text(node, db: Database, config: Config) -> str:
+    """Everything the "🧪 Проверить" button can honestly say from data
+    the server already has - never connects to the node itself
+    (architecture stays Agent -> Server, no SSH/remote exec)."""
+    now = datetime.now(timezone.utc)
+    offline_after = runtime_settings.get_node_offline_after_seconds(db, config)
+    online = node.is_online(offline_after, now)
+
+    effective_monitoring = node.monitoring_enabled and fleet_control.is_monitoring_enabled(db)
+    effective_sending = node.sending_enabled and fleet_control.is_sending_enabled(db)
+
+    issues: list[str] = []
+    lines = [f"🧪 <b>Проверка ноды: {node.name}</b>\n"]
+
+    hb_line = format_relative_time(node.last_heartbeat_at, now)
+    lines.append(f"Heartbeat: {hb_line}")
+    if node.last_heartbeat_at is not None:
+        delay = (now - node.last_heartbeat_at).total_seconds()
+        lines.append(f"Задержка heartbeat: {int(delay)} сек (порог offline: {offline_after} сек)")
+        if delay > offline_after:
+            issues.append("нет свежего heartbeat - нода считается offline")
+    else:
+        issues.append("от ноды ещё не было ни одного heartbeat")
+
+    lines.append(f"Версия агента: {node.version or '—'}")
+    if not effective_monitoring:
+        why = "выключен на ноде" if not node.monitoring_enabled else "выключен на всей флотилии"
+        lines.append(f"Мониторинг: на паузе ({why}) - capture ожидаемо не запущен")
+    if not effective_sending:
+        why = "выключена на ноде" if not node.sending_enabled else "выключена на всей флотилии"
+        lines.append(f"Отправка: на паузе ({why}) - 503 ниже ожидаем")
+
+    if node.capture_tls_running is not None or node.capture_dns_running is not None:
+        cap_bits = []
+        if node.capture_tls_running is not None:
+            cap_bits.append(f"TLS SNI {'работает' if node.capture_tls_running else 'НЕ работает'}")
+            if effective_monitoring and not node.capture_tls_running:
+                issues.append("мониторинг включён, но capture TLS SNI не запущен на агенте")
+        if node.capture_dns_running is not None:
+            cap_bits.append(f"DNS {'работает' if node.capture_dns_running else 'НЕ работает'}")
+        lines.append("Capture: " + ", ".join(cap_bits))
+    else:
+        lines.append("Capture: неизвестно (агент не сообщает - обновите agent)")
+
+    if node.buffer_bytes is not None and node.buffer_limit_bytes:
+        pct = 100 * node.buffer_bytes / node.buffer_limit_bytes
+        lines.append(
+            f"Буфер (backlog): {node.agent_buffer_size or 0} событий, "
+            f"{format_bytes(node.buffer_bytes)} / {format_bytes(node.buffer_limit_bytes)} ({pct:.0f}%)"
+        )
+        if pct >= 90:
+            issues.append(f"буфер заполнен на {pct:.0f}% - события могут начать теряться")
+    elif node.agent_buffer_size:
+        lines.append(f"Буфер (backlog): {node.agent_buffer_size} событий")
+
+    lines.append(f"Последняя успешная отправка на сервер: {format_relative_time(node.last_send_success_at, now)}")
+    if node.last_send_error:
+        lines.append(f"⚠️ Ошибка последней отправки: {html.escape(node.last_send_error)}")
+        if effective_sending:
+            issues.append("последняя отправка событий закончилась ошибкой")
+        # else: "503 Service Unavailable" is the server's deliberate
+        # response while sending is paused - showing the raw text above
+        # is honest, but it's not a problem to flag when the pause is
+        # intentional (same "не выдумывать проблему" rule as monitoring).
+    if node.dropped_events_total:
+        lines.append(f"Потеряно событий (с последнего запуска агента): {node.dropped_events_total}")
+        issues.append(f"агент уже потерял {node.dropped_events_total} событий из переполненного буфера")
+
+    lines.append("")
+    if online and not issues:
+        lines.append("✅ Проблем не найдено.")
+    else:
+        lines.append("Найденные проблемы:")
+        lines.extend(f"  • {issue}" for issue in issues)
+
+    return "\n".join(lines)
+
+
+@router.callback_query(F.data.startswith("node_check:"))
+async def cb_node_check(call: CallbackQuery, db: Database, config: Config) -> None:
+    node_id = int(call.data.split(":")[1])
+    node = db.get_node(node_id)
+    if node is None:
+        await call.answer("Нода не найдена", show_alert=True)
+        return
+    text = _build_node_check_text(node, db, config)
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=kb.back_button(f"node:{node.id}"))
+    await call.answer()
+
+
 @router.callback_query(F.data.startswith("node_toggle_mon:"))
 async def cb_node_toggle_mon(call: CallbackQuery, db: Database, config: Config) -> None:
     node_id = int(call.data.split(":")[1])
