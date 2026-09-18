@@ -185,6 +185,13 @@ class Database:
             )
             self._conn.commit()
 
+    def set_node_last_known_online(self, node_id: int, online: bool) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE nodes SET last_known_online = ? WHERE id = ?", (int(online), node_id)
+            )
+            self._conn.commit()
+
     def set_node_sending(self, node_id: int, enabled: bool) -> None:
         with self._lock:
             self._conn.execute(
@@ -266,6 +273,7 @@ class Database:
             notify_group_chat_id=row["notify_group_chat_id"],
             notify_group_topic_id=row["notify_group_topic_id"],
             agent_buffer_size=row["agent_buffer_size"],
+            last_known_online=None if row["last_known_online"] is None else bool(row["last_known_online"]),
         )
 
     # ------------------------------------------------------------------

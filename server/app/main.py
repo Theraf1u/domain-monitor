@@ -18,6 +18,7 @@ from app.api import domains, events, nodes, stats
 from app.backup_task import BackupTask
 from app.config import load_config
 from app.database import Database
+from app.health_monitor import NodeHealthMonitor
 from app.live_view import LiveViewManager
 from app.logging_config import setup_logging
 from app.metrics import DOMAINS_TOTAL, NODES_ONLINE, NODES_TOTAL
@@ -81,10 +82,12 @@ async def lifespan(app: FastAPI):
     )
 
     stop_polling = asyncio.Event()
+    health_monitor = NodeHealthMonitor(db, config, notifier)
     background_tasks = [
         asyncio.create_task(RetentionTask(db, config).run()),
         asyncio.create_task(notifier.run()),
         asyncio.create_task(backup_task.run()),
+        asyncio.create_task(health_monitor.run()),
     ]
 
     bot, dp = build_bot_and_dispatcher(config, db, notifier, backup_task, topic_binding, live_view)
@@ -105,6 +108,7 @@ async def lifespan(app: FastAPI):
         logger.info("Shutting down")
         notifier.stop()
         backup_task.stop()
+        health_monitor.stop()
         live_view.stop_all()
         stop_polling.set()
         for task in background_tasks:

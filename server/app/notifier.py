@@ -113,6 +113,22 @@ class Notifier:
         text = f"🚨 <b>WATCHLIST DOMAIN</b>\n\n<code>{domain}</code>\n\nНода: {node.name}"
         await self.deliver_for_node(node, text)
 
+    async def notify_offline(self, node: Node) -> None:
+        """Fired once per online->offline transition by NodeHealthMonitor
+        - never on a timer, so a node that stays offline for a week
+        doesn't produce a week of repeated pings."""
+        if self.bot is None or not node.notifications_enabled:
+            return
+        text = f"🔴 Нода <b>{node.name}</b> недоступна (нет heartbeat)"
+        await self.deliver_for_node(node, text)
+
+    async def notify_recovered(self, node: Node) -> None:
+        """Mirror of notify_offline() for the offline->online transition."""
+        if self.bot is None or not node.notifications_enabled:
+            return
+        text = f"🟢 Нода <b>{node.name}</b> снова на связи"
+        await self.deliver_for_node(node, text)
+
     async def run(self) -> None:
         while not self._stopped.is_set():
             mode = self.batch_mode()
