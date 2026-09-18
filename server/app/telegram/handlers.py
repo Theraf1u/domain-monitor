@@ -1278,18 +1278,39 @@ async def cb_filter_check(call: CallbackQuery, state: FSMContext) -> None:
 @router.message(Inputs.waiting_for_filter_check)
 async def on_filter_check_input(message: Message, state: FSMContext, db: Database) -> None:
     await state.clear()
-    domain = normalize_domain((message.text or "").strip())
+    raw = (message.text or "").strip()
+    domain = normalize_domain(raw)
     if domain is None:
-        await message.answer("Не похоже на домен. Попробуйте снова из меню фильтров.", reply_markup=kb.back_button("filters"))
+        await message.answer(
+            f"«{html.escape(raw)}» не похоже на домен. Попробуйте снова из меню фильтров.",
+            parse_mode="HTML", reply_markup=kb.back_button("filters"),
+        )
         return
-    verdict = classify_domain(domain, db.all_filter_rules_cached())
+
+    all_rules = db.all_filter_rules_cached()
+    verdict = classify_domain(domain, all_rules)
+    matched = [r for r in all_rules if r.id in verdict.matched_rule_ids]
+
+    list_icon = {"watch": "🚨", "ignore": "🚫", "allow": "✅"}
+    if matched:
+        rules_lines = "\n".join(
+            f"  {list_icon.get(r.list_type, '•')} {r.list_type}: "
+            f"<code>{html.escape(r.pattern)}</code> ({kb.PATTERN_TAG.get(r.pattern_type, r.pattern_type)})"
+            for r in matched
+        )
+        rules_block = f"Совпавшие правила:\n{rules_lines}"
+    else:
+        rules_block = "Совпавших правил нет."
+
     if verdict.is_watched:
-        result = "🚨 Watch — сработает мгновенное уведомление, даже если попадает под Ignore/Allow"
+        result = "🚨 Watch — придёт мгновенное уведомление, даже если домен попадает под Ignore/Allow"
     elif verdict.suppresses_notification:
         result = "🔕 Подавлен (Ignore/Allow) — уведомления не будет"
     else:
         result = "🔔 Обычный домен — уведомление придёт по текущему режиму группировки"
-    await message.answer(f"<code>{domain}</code>\n\n{result}", parse_mode="HTML", reply_markup=kb.back_button("filters"))
+
+    text = f"<code>{domain}</code>\n\n{rules_block}\n\nИтог: {result}"
+    await message.answer(text, parse_mode="HTML", reply_markup=kb.back_button("filters"))
 
 
 # ------------------------------------------------------------------
