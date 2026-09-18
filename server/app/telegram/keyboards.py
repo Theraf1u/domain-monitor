@@ -384,8 +384,9 @@ def filters_menu(counts: dict[str, int]) -> InlineKeyboardMarkup:
     b.button(text=f"✅ Allow ({counts.get('allow', 0)})", callback_data="filters_list:allow:0")
     b.button(text="🔍 Проверить домен", callback_data="filter_check", style="primary")
     b.button(text="➕ Добавить правило", callback_data="filter_add", style="success")
+    b.button(text="📥 Массовый импорт", callback_data="filter_import", style="primary")
     b.button(text="⬅️ Назад", callback_data="main")
-    b.adjust(1, 1, 1, 1, 1, 1)
+    b.adjust(1, 1, 1, 1, 1, 1, 1)
     return b.as_markup()
 
 
@@ -452,6 +453,30 @@ def filter_add_pattern_type(list_type: str) -> InlineKeyboardMarkup:
     b.button(text="❌ Отмена", callback_data="filters")
     b.adjust(3, 1)
     return b.as_markup()
+
+
+def filter_import_list_type() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="🚨 Watch", callback_data="filter_import_type:watch")
+    b.button(text="🚫 Ignore", callback_data="filter_import_type:ignore")
+    b.button(text="✅ Allow", callback_data="filter_import_type:allow")
+    b.button(text="❌ Отмена", callback_data="filters")
+    b.adjust(3, 1)
+    return b.as_markup()
+
+
+def filter_import_pattern_type(list_type: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="Suffix", callback_data=f"filter_import_ptype:{list_type}:suffix")
+    b.button(text="Exact", callback_data=f"filter_import_ptype:{list_type}:exact")
+    b.button(text="Wildcard", callback_data=f"filter_import_ptype:{list_type}:wildcard")
+    b.button(text="❌ Отмена", callback_data="filters")
+    b.adjust(3, 1)
+    return b.as_markup()
+
+
+def confirm_filter_import() -> InlineKeyboardMarkup:
+    return confirm_keyboard("✅ Да, импортировать", "filter_import_confirm", "filters")
 
 
 def domain_notification(domain_id: int) -> InlineKeyboardMarkup:

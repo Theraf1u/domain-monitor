@@ -4,7 +4,9 @@ keyboards" rule carried over from the single-node MVP.
 """
 from __future__ import annotations
 
+import csv
 import html
+import io
 import logging
 import os
 import socket
@@ -49,6 +51,7 @@ class Inputs(StatesGroup):
     waiting_for_node_search = State()
     waiting_for_filter_pattern = State()
     waiting_for_filter_comment = State()
+    waiting_for_filter_import = State()
     waiting_for_filter_check = State()
     waiting_for_export_range = State()
     waiting_for_custom_batch_seconds = State()
@@ -1263,6 +1266,180 @@ async def on_filter_pattern_input(message: Message, state: FSMContext, db: Datab
         f"Уже было (пропущено): {duplicates}",
         reply_markup=kb.back_button("filters"),
     )
+
+
+def _extract_patterns_from_text(text: str) -> list[str]:
+    seen: set[str] = set()
+    patterns: list[str] = []
+    for line in text.splitlines():
+        pattern = line.strip().lower()
+        if not pattern or pattern in seen:
+            continue
+        seen.add(pattern)
+        patterns.append(pattern)
+    return patterns
+
+
+def _extract_patterns_from_csv(text: str) -> list[str]:
+    """Takes the first column of every row - a filter-import CSV is just
+    a list of patterns, optionally with extra columns nobody asked us to
+    interpret. A header row's first cell (e.g. "pattern") is harmless
+    here: it'll fail _looks_like_pattern() and land in the invalid
+    count, not silently get imported as a real rule."""
+    reader = csv.reader(io.StringIO(text))
+    seen: set[str] = set()
+    patterns: list[str] = []
+    for row in reader:
+        if not row:
+            continue
+        pattern = row[0].strip().lower()
+        if not pattern or pattern in seen:
+            continue
+        seen.add(pattern)
+        patterns.append(pattern)
+    return patterns
+
+
+def _looks_like_pattern(s: str) -> bool:
+    """Deliberately looser than normalize_domain() - wildcard patterns
+    like "*.example.com" are valid filter_rule patterns but would fail
+    strict hostname validation. Just enough of a sanity check to catch
+    obviously-broken lines (empty, whitespace inside, absurdly long)."""
+    return bool(s) and " " not in s and "\t" not in s and len(s) <= 253
+
+
+async def _render_filter_import_preview(
+    message: Message, state: FSMContext, db: Database, list_type: str, pattern_type: str, patterns: list[str],
+) -> None:
+    valid = [p for p in patterns if _looks_like_pattern(p)]
+    invalid_count = len(patterns) - len(valid)
+    existing_same_list = {r.pattern for r in db.list_filter_rules(list_type) if r.pattern_type == pattern_type}
+    new_patterns = [p for p in valid if p not in existing_same_list]
+    duplicate_count = len(valid) - len(new_patterns)
+
+    other_lists = [lt for lt in ("watch", "ignore", "allow") if lt != list_type]
+    conflicts = []
+    for lt in other_lists:
+        other_patterns = {r.pattern for r in db.list_filter_rules(lt)}
+        conflicts.extend(p for p in new_patterns if p in other_patterns)
+
+    await state.update_data(
+        filter_import_list_type=list_type, filter_import_pattern_type=pattern_type, filter_import_patterns=new_patterns,
+    )
+
+    lines = [
+        "📥 <b>Предпросмотр импорта</b>",
+        f"Список: {list_type}, тип паттерна: {kb.PATTERN_TAG.get(pattern_type, pattern_type)}",
+        "",
+        f"Найдено строк: {len(patterns)}",
+        f"Новых: {len(new_patterns)}",
+        f"Уже есть в этом списке (пропустятся): {duplicate_count}",
+        f"Некорректных (пропустятся): {invalid_count}",
+    ]
+    if conflicts:
+        shown = ", ".join(f"<code>{html.escape(p)}</code>" for p in conflicts[:10])
+        more = f" и ещё {len(conflicts) - 10}" if len(conflicts) > 10 else ""
+        lines.append(
+            f"\n⚠️ Уже есть в другом списке (Watch/Ignore/Allow): {shown}{more}\n"
+            f"Будут добавлены и сюда - приоритет Watch над Ignore/Allow не меняется."
+        )
+    if not new_patterns:
+        lines.append("\nНечего импортировать - все строки уже есть или некорректны.")
+        await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=kb.back_button("filters"))
+        return
+
+    lines.append(f"\nИмпортировать {len(new_patterns)} новых правил?")
+    await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=kb.confirm_filter_import())
+
+
+@router.callback_query(F.data == "filter_import")
+async def cb_filter_import(call: CallbackQuery) -> None:
+    await call.message.edit_text("Выберите список для импорта:", reply_markup=kb.filter_import_list_type())
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("filter_import_type:"))
+async def cb_filter_import_type(call: CallbackQuery) -> None:
+    list_type = call.data.split(":", 1)[1]
+    await call.message.edit_text(
+        f"Список: {list_type}\nВыберите тип паттерна:", reply_markup=kb.filter_import_pattern_type(list_type),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("filter_import_ptype:"))
+async def cb_filter_import_ptype(call: CallbackQuery, state: FSMContext) -> None:
+    _, list_type, pattern_type = call.data.split(":")
+    await state.set_state(Inputs.waiting_for_filter_import)
+    await state.update_data(filter_import_list_type=list_type, filter_import_pattern_type=pattern_type)
+    await call.message.edit_text(
+        "Вставьте список паттернов (по одному на строку) текстом, "
+        "или пришлите файлом <b>.txt</b> (по строке) или <b>.csv</b> (первая колонка).",
+        parse_mode="HTML", reply_markup=kb.cancel_input("filters"),
+    )
+    await call.answer()
+
+
+@router.message(Inputs.waiting_for_filter_import, F.document)
+async def on_filter_import_document(message: Message, state: FSMContext, db: Database, bot: Bot) -> None:
+    data = await state.get_data()
+    list_type, pattern_type = data.get("filter_import_list_type"), data.get("filter_import_pattern_type")
+    await state.set_state(None)
+    if not list_type or not pattern_type:
+        await message.answer("Сессия истекла. Откройте меню фильтров и попробуйте снова.", reply_markup=kb.back_button("filters"))
+        return
+    filename = message.document.file_name or ""
+    try:
+        buf = await bot.download(message.document)
+        text = buf.read().decode("utf-8", errors="replace")
+    except Exception:
+        logger.exception("Failed to download filter import document")
+        await message.answer("Не удалось прочитать файл. Попробуйте ещё раз.", reply_markup=kb.back_button("filters"))
+        return
+    patterns = _extract_patterns_from_csv(text) if filename.lower().endswith(".csv") else _extract_patterns_from_text(text)
+    if not patterns:
+        await message.answer("Файл пустой или не удалось разобрать ни одной строки.", reply_markup=kb.back_button("filters"))
+        return
+    await _render_filter_import_preview(message, state, db, list_type, pattern_type, patterns)
+
+
+@router.message(Inputs.waiting_for_filter_import)
+async def on_filter_import_text(message: Message, state: FSMContext, db: Database) -> None:
+    data = await state.get_data()
+    list_type, pattern_type = data.get("filter_import_list_type"), data.get("filter_import_pattern_type")
+    await state.set_state(None)
+    if not list_type or not pattern_type:
+        await message.answer("Сессия истекла. Откройте меню фильтров и попробуйте снова.", reply_markup=kb.back_button("filters"))
+        return
+    patterns = _extract_patterns_from_text(message.text or "")
+    if not patterns:
+        await message.answer("Пустой ввод, попробуйте снова из меню фильтров.", reply_markup=kb.back_button("filters"))
+        return
+    await _render_filter_import_preview(message, state, db, list_type, pattern_type, patterns)
+
+
+@router.callback_query(F.data == "filter_import_confirm")
+async def cb_filter_import_confirm(call: CallbackQuery, state: FSMContext, db: Database) -> None:
+    data = await state.get_data()
+    list_type = data.get("filter_import_list_type")
+    pattern_type = data.get("filter_import_pattern_type")
+    patterns = data.get("filter_import_patterns") or []
+    await state.update_data(filter_import_patterns=None)
+    if not list_type or not pattern_type or not patterns:
+        await call.answer("Нечего импортировать (сессия истекла?)", show_alert=True)
+        return
+    added = duplicates = 0
+    for pattern in patterns:
+        rule = db.add_filter_rule(list_type, pattern_type, pattern)
+        if rule is None:
+            duplicates += 1
+        else:
+            added += 1
+    await call.message.edit_text(
+        f"✅ Импорт в {list_type} завершён.\nДобавлено: {added}\nПропущено (гонка/дубликат): {duplicates}",
+        reply_markup=kb.back_button("filters"),
+    )
+    await call.answer()
 
 
 @router.callback_query(F.data == "filter_check")
