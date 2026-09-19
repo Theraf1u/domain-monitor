@@ -101,6 +101,7 @@ run_wizard() {
     fi
 
     echo
+    export GIT_REV="$(git -C "$PROJECT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
     if ! (cd "$PROJECT_DIR" && compose_build_quiet); then
         echo
         echo "[ОШИБКА] Сборка/запуск не завершились - см. ошибку выше." >&2

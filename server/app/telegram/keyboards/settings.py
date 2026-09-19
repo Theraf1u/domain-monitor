@@ -23,12 +23,13 @@ def settings_menu(watchlist_enabled: bool) -> InlineKeyboardMarkup:
     b.button(text="👥 Администраторы", callback_data="settings_admins", style="primary")
     b.button(text="🔐 Безопасность", callback_data="settings_security", style="primary")
     b.button(text="🩺 Диагностика", callback_data="settings_diagnostics", style="primary")
+    b.button(text="🔄 Обновления", callback_data="settings_updates", style="primary")
     b.button(text="🚚 Миграция", callback_data="settings_migration", style="primary")
     b.button(text="ℹ️ О системе", callback_data="settings_about", style="primary")
     wl_label = _toggle_label("Watch-уведомления включены", "Watch-уведомления выключены", watchlist_enabled)
     b.button(text=wl_label, callback_data="settings_toggle_watchlist", style=_toggle_style(watchlist_enabled))
     b.button(text="⬅️ Назад", callback_data="main")
-    b.adjust(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1)
+    b.adjust(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1)
     return b.as_markup()
 
 
@@ -110,6 +111,14 @@ def settings_server_menu() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="⬅️ Назад", callback_data="settings")
     b.adjust(1)
+    return b.as_markup()
+
+
+def settings_updates_menu() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="🔄 Проверить снова", callback_data="settings_updates_check", style="primary")
+    b.button(text="⬅️ Назад", callback_data="settings")
+    b.adjust(1, 1)
     return b.as_markup()
 
 

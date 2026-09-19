@@ -389,6 +389,81 @@ async def cb_settings_about(call: CallbackQuery, db: Database, config: Config) -
 
 
 # ------------------------------------------------------------------
+# spec 2.0 Part 2, section 6 - 🔄 Обновления
+#
+# Checking for an update is a plain outbound HTTPS call (GitHub's public
+# API, no auth needed) - the bot container can do that fine. Actually
+# TRIGGERING an update (git pull + rebuild + restart this very container)
+# is the same "can't act on itself from inside itself" limitation as
+# Миграция above, so this screen only informs and points at the CLI.
+# ------------------------------------------------------------------
+
+_GITHUB_LATEST_COMMIT_URL = "https://api.github.com/repos/Theraf1u/domain-monitor/commits/main"
+
+
+async def _updates_text(config: Config) -> str:
+    current_rev = git_revision()
+    lines = [
+        "🔄 <b>Обновления</b>\n",
+        f"Текущая версия: {SERVER_VERSION}",
+        f"Текущая ревизия: <code>{current_rev}</code>",
+    ]
+    if current_rev == "unknown":
+        lines.append(
+            "\n⚠️ Ревизия неизвестна (сервер собран без GIT_REV - переустанови "
+            "через актуальный install.sh/update.sh, там это уже исправлено) - "
+            "сравнить с последней версией на GitHub не могу."
+        )
+        return "\n".join(lines)
+
+    import aiohttp
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                _GITHUB_LATEST_COMMIT_URL, timeout=aiohttp.ClientTimeout(total=8),
+                headers={"Accept": "application/vnd.github+json"},
+            ) as resp:
+                if resp.status != 200:
+                    raise RuntimeError(f"GitHub API вернул {resp.status}")
+                data = await resp.json()
+    except Exception as exc:
+        lines.append(f"\n⚠️ Не удалось проверить обновления на GitHub: {type(exc).__name__}")
+        return "\n".join(lines)
+
+    latest_sha = data.get("sha", "")[:7]
+    latest_msg = (data.get("commit", {}).get("message") or "").splitlines()[0] if data.get("commit") else ""
+    if not latest_sha:
+        lines.append("\n⚠️ GitHub API вернул неожиданный ответ - сравнить не удалось.")
+    elif latest_sha == current_rev or latest_sha.startswith(current_rev) or current_rev.startswith(latest_sha):
+        lines.append("\n✅ Установлена последняя версия.")
+    else:
+        lines.append(
+            f"\n🆕 Доступно обновление: <code>{latest_sha}</code> - {latest_msg}\n\n"
+            "Обновить (заберёт код, пересоберёт, перезапустит):\n"
+            "<code>domain-monitor-server update</code>"
+        )
+    lines.append(
+        "\nАвтообновление по расписанию включается/выключается с самого "
+        "сервера (там же лог) - изнутри контейнера это не видно:\n"
+        "<code>dm</code> → 6) Управление скриптом"
+    )
+    return "\n".join(lines)
+
+
+@router.callback_query(F.data == "settings_updates")
+async def cb_settings_updates(call: CallbackQuery, config: Config) -> None:
+    await call.answer("Проверяю...")
+    text = await _updates_text(config)
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=kb.settings_updates_menu())
+
+
+@router.callback_query(F.data == "settings_updates_check")
+async def cb_settings_updates_check(call: CallbackQuery, config: Config) -> None:
+    await cb_settings_updates(call, config)
+
+
+# ------------------------------------------------------------------
 # 1.6 / spec 3.6 Миграция
 #
 # The bot runs inside the SAME container as the API, so it can read/write

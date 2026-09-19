@@ -80,6 +80,7 @@ echo "[*] Открываю порт в файрволе, если UFW актив
 open_firewall_port "$PORT"
 
 echo
+export GIT_REV="$(git -C "$PROJECT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 if ! (cd "$PROJECT_DIR" && compose_build_quiet); then
     echo "ОШИБКА: сборка/запуск сервера в standby-режиме не завершились." >&2
     exit 1

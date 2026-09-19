@@ -18,7 +18,13 @@ else
     echo "[!] Это не git-репозиторий - пересобираю локальные файлы как есть."
 fi
 
-echo "[*] Пересобираю образ..."
+# Baked into the image as app/GIT_REV (see Dockerfile) - read back by
+# app/version.py for the "🖥 Сервер"/"ℹ️ О системе"/"🔄 Обновления"
+# Settings screens. Without exporting this, the ARG defaults to "unknown"
+# and those screens can't tell whether an update is even available.
+export GIT_REV="$(git -C "$(git rev-parse --show-toplevel 2>/dev/null || echo .)" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+
+echo "[*] Пересобираю образ (GIT_REV=$GIT_REV)..."
 compose build
 
 echo "[*] Перезапускаю..."
