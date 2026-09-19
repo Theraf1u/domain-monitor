@@ -123,6 +123,22 @@ docker compose down -v && rm -rf data                   # stop + wipe local buff
 - A revoked token (from the Server) makes every further push return 403;
   the agent logs this clearly rather than retrying forever.
 
+## Tests
+
+```bash
+cd agent
+python -m venv .venv && . .venv/bin/activate   # or .venv\Scripts\activate on Windows
+pip install -r requirements-dev.txt
+pytest
+```
+
+Covers the persistent runtime override (`app/runtime_config.py`) and the
+full Migration 2.0 switchover protocol (`UplinkTask._try_migrate()`) -
+the latter runs against real local HTTP servers standing in for a
+migration target, not mocks, covering the happy path (switch + persist +
+survives a restart) and every failure mode (target unreachable, target
+rejects the token) that must leave the agent exactly where it was.
+
 ## License
 
 MIT.

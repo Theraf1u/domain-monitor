@@ -1,0 +1,8 @@
+# Test-only dependencies - never installed in the production image
+# (Dockerfile only installs requirements.txt). httpx is what FastAPI's
+# own TestClient uses under the hood; aiogram already pulls it in
+# transitively, but pinning it here keeps `pip install -r
+# requirements-dev.txt` sufficient on its own for a clean venv.
+-r requirements.txt
+pytest==8.4.2
+httpx==0.28.1

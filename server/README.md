@@ -263,6 +263,24 @@ guide for a migrated server's DNS record (Migration 2.0 handles the
 server-side and agent-side switchover; keeping a domain name pointed at
 wherever the current server actually is is still a manual DNS step).
 
+## Tests
+
+```bash
+cd server
+python -m venv .venv && . .venv/bin/activate   # or .venv\Scripts\activate on Windows
+pip install -r requirements-dev.txt
+pytest
+```
+
+Every test runs against a real throwaway SQLite database (via a `tmp_path`
+fixture), never mocks - migrations (each one simulated on top of
+pre-existing data to confirm it's truly additive), filter classification
+and priority, the Migration 2.0 REST API and heartbeat gating, and Backup
+Manager 2.0 (including a regression test for the same-second filename
+collision bug found and fixed this session). Not a full test suite for
+every screen and feature in the project - see `tests/` for exactly what's
+covered.
+
 ## License
 
 MIT.
