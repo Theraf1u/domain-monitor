@@ -1,78 +1,70 @@
-<svg viewBox="0 0 1200 400" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 1200 420" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#08080d"/>
-      <stop offset="55%" stop-color="#0d0d18"/>
-      <stop offset="100%" stop-color="#111122"/>
+      <stop offset="0%" stop-color="#07070c"/>
+      <stop offset="55%" stop-color="#0c0c17"/>
+      <stop offset="100%" stop-color="#101020"/>
     </linearGradient>
     <radialGradient id="orbBlue" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.55"/>
+      <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.5"/>
       <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
     </radialGradient>
     <radialGradient id="orbPurple" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#a855f7" stop-opacity="0.5"/>
+      <stop offset="0%" stop-color="#a855f7" stop-opacity="0.45"/>
       <stop offset="100%" stop-color="#a855f7" stop-opacity="0"/>
     </radialGradient>
     <radialGradient id="orbCyan" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.4"/>
+      <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.38"/>
       <stop offset="100%" stop-color="#22d3ee" stop-opacity="0"/>
     </radialGradient>
-    <filter id="blurBig" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur stdDeviation="55"/>
+    <filter id="blurBig" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="60"/>
     </filter>
     <linearGradient id="glassFill" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.10"/>
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.03"/>
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.09"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.025"/>
     </linearGradient>
     <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.3"/>
       <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
     </linearGradient>
     <linearGradient id="titleGrad" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="100%" stop-color="#bcd0ff"/>
+      <stop offset="100%" stop-color="#cdd9ff"/>
     </linearGradient>
-    <clipPath id="cardClip"><rect x="60" y="70" width="1080" height="260" rx="34"/></clipPath>
     <linearGradient id="pillFill" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#22c55e" stop-opacity="0.28"/>
-      <stop offset="100%" stop-color="#22d3ee" stop-opacity="0.20"/>
+      <stop offset="0%" stop-color="#22c55e" stop-opacity="0.30"/>
+      <stop offset="100%" stop-color="#22d3ee" stop-opacity="0.22"/>
     </linearGradient>
+    <clipPath id="cardClip"><rect x="70" y="60" width="1060" height="300" rx="36"/></clipPath>
   </defs>
 
-  <rect width="1200" height="400" fill="url(#bg)"/>
+  <rect width="1200" height="420" fill="url(#bg)"/>
 
-  <!-- blurred light orbs (the "liquid" refraction glow) -->
-  <circle cx="180" cy="90" r="160" fill="url(#orbBlue)" filter="url(#blurBig)"/>
-  <circle cx="1040" cy="330" r="190" fill="url(#orbPurple)" filter="url(#blurBig)"/>
-  <circle cx="620" cy="360" r="150" fill="url(#orbCyan)" filter="url(#blurBig)"/>
-  <circle cx="950" cy="60" r="120" fill="url(#orbCyan)" filter="url(#blurBig)"/>
+  <!-- blurred light orbs, symmetric around the panel -->
+  <circle cx="150" cy="70" r="170" fill="url(#orbBlue)" filter="url(#blurBig)"/>
+  <circle cx="1050" cy="70" r="170" fill="url(#orbPurple)" filter="url(#blurBig)"/>
+  <circle cx="600" cy="420" r="220" fill="url(#orbCyan)" filter="url(#blurBig)"/>
 
-  <!-- main glass panel -->
-  <rect x="60" y="70" width="1080" height="260" rx="34" fill="url(#glassFill)" stroke="#ffffff" stroke-opacity="0.14"/>
+  <!-- main glass panel, centered in the canvas -->
+  <rect x="70" y="60" width="1060" height="300" rx="36" fill="url(#glassFill)" stroke="#ffffff" stroke-opacity="0.14"/>
   <g clip-path="url(#cardClip)">
-    <rect x="60" y="70" width="1080" height="3" fill="url(#sheen)"/>
-    <ellipse cx="260" cy="90" rx="260" ry="40" fill="#ffffff" opacity="0.05"/>
+    <rect x="70" y="60" width="1060" height="3" fill="url(#sheen)"/>
   </g>
 
-  <!-- little node dots top-right, echoing the multi-node theme -->
-  <g opacity="0.85">
-    <circle cx="1000" cy="130" r="5" fill="#34d399"/>
-    <circle cx="1030" cy="150" r="5" fill="#34d399"/>
-    <circle cx="1000" cy="170" r="5" fill="#f59e0b"/>
-    <circle cx="1060" cy="120" r="5" fill="#34d399"/>
-    <line x1="1000" y1="130" x2="1030" y2="150" stroke="#ffffff" stroke-opacity="0.25" stroke-width="1.5"/>
-    <line x1="1030" y1="150" x2="1000" y2="170" stroke="#ffffff" stroke-opacity="0.25" stroke-width="1.5"/>
-    <line x1="1030" y1="150" x2="1060" y2="120" stroke="#ffffff" stroke-opacity="0.25" stroke-width="1.5"/>
+  <!-- content block, centered both horizontally (x=600) and vertically inside the panel -->
+  <g text-anchor="middle" font-family="-apple-system, 'SF Pro Display', 'SF Pro Text', 'Segoe UI', sans-serif">
+    <text x="600" y="168" font-size="48" font-weight="700" fill="url(#titleGrad)" letter-spacing="-0.5">Domain Monitor</text>
+
+    <text x="600" y="212" font-size="21" font-weight="500" fill="#e2e7f7">Понять, с какими доменами общаются приложения на ноде —</text>
+    <text x="600" y="240" font-size="21" font-weight="500" fill="#e2e7f7">и пустить нужные из них в обход VPN, напрямую</text>
+
+    <!-- purpose pill, width sized to fit its own text, centered -->
+    <g transform="translate(600,278)">
+      <rect x="-235" y="-21" width="470" height="42" rx="21" fill="url(#pillFill)" stroke="#ffffff" stroke-opacity="0.18"/>
+      <text x="0" y="6" font-size="16" font-weight="600" fill="#dffbea">🇷🇺 whitelist-роутинг для российских сервисов</text>
+    </g>
+
+    <text x="600" y="325" font-size="14" fill="#8fa0cc" opacity="0.9">Ставится за пару минут на любую VPN-ноду · управление целиком в Telegram</text>
   </g>
-
-  <text x="110" y="165" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', sans-serif" font-size="52" font-weight="700" fill="url(#titleGrad)" letter-spacing="-1">Domain Monitor <tspan fill="#8fa3d1" font-size="30" font-weight="600">2.0</tspan></text>
-
-  <text x="110" y="212" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', sans-serif" font-size="22" font-weight="600" fill="#e6ebfb">Понять, с какими доменами общаются приложения на ноде —</text>
-  <text x="110" y="242" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', sans-serif" font-size="22" font-weight="600" fill="#e6ebfb">и пустить нужные из них в обход VPN, напрямую</text>
-
-  <!-- purpose pill badge -->
-  <rect x="110" y="266" width="430" height="40" rx="20" fill="url(#pillFill)" stroke="#ffffff" stroke-opacity="0.18"/>
-  <text x="132" y="292" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', sans-serif" font-size="15" font-weight="600" fill="#d8fbe8">🇷🇺 whitelist-роутинг для российских сервисов</text>
-
-  <text x="110" y="325" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', sans-serif" font-size="14" fill="#8fa0cc" opacity="0.9">Ставится за пару минут на любую VPN-ноду · управление целиком в Telegram</text>
 </svg>

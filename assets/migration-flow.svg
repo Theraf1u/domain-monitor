@@ -37,7 +37,7 @@
   <circle cx="820" cy="130" r="170" fill="url(#orbGreen)" filter="url(#blurBig)"/>
   <circle cx="500" cy="380" r="180" fill="url(#orbBlue)" filter="url(#blurBig)"/>
 
-  <text x="500" y="46" text-anchor="middle" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', sans-serif" font-size="26" font-weight="700" fill="#ffffff">Migration 2.0</text>
+  <text x="500" y="46" text-anchor="middle" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', sans-serif" font-size="26" font-weight="700" fill="#ffffff">Перенос на другой сервер</text>
   <text x="500" y="72" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="14" fill="#9fb0d8">migrate-to → migrate-cutover → migrate-finish</text>
 
   <!-- OLD server -->
