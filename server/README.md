@@ -43,12 +43,32 @@ README for the agent installer.
   notifications; Watch always fires an instant 🚨 alert (wins over the
   other two if a domain matches both).
 - **Prometheus metrics** at `/metrics`: `events_total`, `new_domains_total`,
-  `watchlist_hits_total`, `telegram_errors_total`, `nodes_online`,
-  `nodes_total`, `domains_total`.
-- **`doctor`/`backup`/`restore`** via the CLI: `domain-monitor-server doctor`
-  runs a checklist (Docker, compose, .env, container health, HTTP, DB
-  integrity, Telegram reachability, disk space) with plain-English fixes;
-  `backup`/`restore` snapshot `./data` + `.env` to/from `./backups/`.
+  `watchlist_hits_total`, `ignore_hits_total`, `telegram_errors_total`,
+  `nodes_online`, `nodes_offline`, `nodes_total`, `domains_total`,
+  `database_size_bytes`, `node_buffer_bytes` (per node id),
+  `events_rate_limited_total`, `backup_result_total` (by kind/result),
+  `migration_active`. No raw domains, filenames, or secrets in any label.
+- **`doctor`** (`domain-monitor-server doctor`): a checklist grouped by
+  category (DOCKER/SECURITY/SERVER/NETWORK/TELEGRAM/SYSTEM) - Docker/
+  Compose presence, `.env`/backup file permissions, container health, DB
+  integrity, PUBLIC_URL correctness, UFW port status, Telegram
+  reachability, disk space - with plain-English fixes for each failure.
+- **Backup Manager 2.0**: two backup types (DB-only or "full", which adds
+  an `.env`-derived snapshot for disaster recovery), automatic checksum +
+  integrity verification on every backup (a backup that fails
+  verification is never used for rotation or restore), restore always
+  takes its own pre-restore safety snapshot first and rolls back
+  automatically if anything after that fails. Manage from the bot's
+  💾 Бэкапы menu, or `domain-monitor-server backup`/`restore <file>` on
+  the CLI.
+- **Migration 2.0**: `domain-monitor-server migrate-to root@NEW_HOST`
+  automates moving the whole control center to a fresh server - SSHes in,
+  bootstraps Docker/Compose/UFW there if needed, brings the new server up
+  in a verified standby mode (API live, Telegram polling off, so it can
+  never conflict with this still-running server), then a separate
+  `migrate-cutover` step makes every agent verify and switch over on its
+  own next heartbeat - no manual per-node commands. See "Migration 2.0"
+  below.
 
 ## Requirements
 
@@ -95,6 +115,11 @@ restore <file>  restore from a backup
 add-node   add a node in one action (no name needed)
 migrate-export           package everything for moving this server to another host
 migrate-import <file>    import a package made by migrate-export on another host
+migrate-to <root@host> [-i key]  automate a full migration to a fresh server (standby)
+migrate-cutover <job_id>         start switching agents over (each verifies, then switches)
+migrate-status [job_id]          per-node migrated/waiting/offline breakdown
+migrate-finish <job_id>          switch the Telegram bot over, complete the migration
+migrate-cancel <job_id>          cancel an in-progress migration
 uninstall  remove container/image/data (with confirmation)
 ```
 
@@ -137,16 +162,79 @@ GET    /api/v1/stats                  dashboard numbers
 The only way to manage the server. Every action is an inline button - no
 commands other than `/start`, no reply keyboards. Covers:
 
-- **📡 Ноды** - list, add, revoke/regenerate token, toggle monitoring/notifications, delete.
-- **🌐 Домены** - recent, top by hits, export as `.txt`.
-- **📊 Статистика** - nodes online, unique domains, events/new domains today.
-- **🔔 Уведомления** - global on/off, batching mode (Instant / 5s / 15s / 30s / 60s).
-- **🔍 Фильтры** - Ignore/Allow/Watch list management (exact/suffix/wildcard patterns).
-- **⚙️ Настройки** - current retention/offline-threshold values.
+- **📡 Ноды** - search/filter, add, revoke/regenerate token, toggle
+  monitoring/notifications/sending, bulk actions across multiple nodes,
+  per-node live telemetry card (buffer size, capture status, agent
+  version, last send error).
+- **🌐 Домены** - search, combined filters (node/period/source/filter
+  status/min hits), per-domain card with Watch/Allow/Ignore right from
+  it, CSV/JSON/TXT export, data-management (delete old events, clear
+  history) with confirmation.
+- **📊 Статистика** - unified periods (1h/6h/today/yesterday/24h/7d/30d/
+  all/custom), period-over-period comparison, source distribution, node
+  offline-incident history, per-node stats screen.
+- **🔔 Уведомления** - per-event-type toggles, batching presets,
+  per-node destination override (DM vs. a specific group/topic), quiet
+  hours, a real "send test notification" button.
+- **🔍 Фильтры** - Ignore/Allow/Watch list management (exact/suffix/
+  wildcard), bulk import (paste/`.txt`/`.csv` with a preview and conflict
+  detection) and export, per-rule hit counts and enable/disable.
+- **⚙️ Настройки** - a hub: Сервер / Ноды по умолчанию / Часовой пояс /
+  Хранение данных / Администраторы / Безопасность / Диагностика /
+  🔄 Обновления (checks GitHub for a newer commit) / 🚚 Миграция (status
+  of an in-progress `migrate-to`, with 🔄 Обновить/✅ Начать
+  переключение/❌ Отменить where the container can safely act, and a
+  printed CLI command where it genuinely can't - see below) / О системе.
+- **💾 Бэкапы** - two backup types, list with checksum/verified status,
+  restore with a confirmation step.
 
 If Telegram is blocked on this server's own network, set `TELEGRAM_PROXY`
 (plain `socks5://` or `http://` - see Configuration above). The bot
 auto-restarts its polling loop if the connection ever drops.
+
+## Migration 2.0
+
+Moving the whole control center (bot + API + data) to a new server, with
+every agent switching over automatically:
+
+```bash
+domain-monitor-server migrate-to root@NEW_HOST   # needs password-less SSH to it
+```
+
+This bootstraps Docker/Compose/UFW on the target if they're missing
+(never reinstalls what's already there), ships a migration package
+(same format as `migrate-export`) and the current code, and brings the
+target up in **standby**: its API and heartbeat endpoint work (so it can
+be verified before anything depends on it), but Telegram polling is off,
+so it can never conflict with this still-fully-running server for the
+same bot token. Prints a job id.
+
+```bash
+domain-monitor-server migrate-cutover <job_id>
+```
+
+Nothing restarts. This just tells the heartbeat endpoint to start
+including the new server's address in its response - each agent
+verifies the target itself (checks its `/healthz`, sends an authenticated
+heartbeat with its own token) before persisting the switch and pointing
+itself there, on its own next heartbeat cycle. An agent that fails that
+check, or one running old code that doesn't understand the field yet,
+just keeps working against this server exactly as before - nothing here
+is a hard cutover.
+
+```bash
+domain-monitor-server migrate-status <job_id>    # ✅ migrated / 🔄 waiting / 🔴 offline, per node
+domain-monitor-server migrate-finish <job_id>    # once you're satisfied: switches the bot itself
+domain-monitor-server migrate-cancel <job_id>    # stop offering the new address to any more agents
+```
+
+`migrate-finish` turns Telegram polling off on THIS server first, then on
+on the new one - never the other way round, so there's no window with
+both polling the same bot token. It never touches or deletes this
+server's own data; tearing the old one down (if you want to) is a
+separate, manual `uninstall`.
+
+The same status is also in the bot itself: ⚙️ Настройки → 🚚 Миграция.
 
 ## Architecture notes
 
@@ -167,12 +255,13 @@ auto-restarts its polling loop if the connection ever drops.
 
 ## Roadmap (not yet built)
 
-Full events history browsing (raw per-sighting log, not just the
-aggregated domain list), per-domain source-of-traffic attribution
-(client IP/Xray user - intentionally not implemented as unreliable
-heuristics), an HTTP Host / QUIC / Xray-log detection source (agent
-currently supports TLS SNI and DNS, both real), and agent version/update
-tracking on the Server side.
+Per-domain source-of-traffic attribution (client IP/Xray user -
+intentionally not implemented as unreliable heuristics), an HTTP Host /
+QUIC / Xray-log detection source (agent currently supports TLS SNI and
+DNS, both real), a formal automated test suite, and a stable-hostname
+guide for a migrated server's DNS record (Migration 2.0 handles the
+server-side and agent-side switchover; keeping a domain name pointed at
+wherever the current server actually is is still a manual DNS step).
 
 ## License
 

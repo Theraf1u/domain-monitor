@@ -11,8 +11,8 @@ beyond a small retry buffer; all of that lives on the Server.
 
 - A Domain Monitor Server already running and reachable from this node.
 - A node token, created on the Server (Telegram: **📡 Ноды → ➕
-  Добавить**, or Web Admin: **Nodes → + Add node**, or
-  `POST /api/v1/nodes`).
+  Добавить**, or `POST /api/v1/nodes` with `X-Admin-Key`). There is no
+  web UI - Telegram is the only management surface.
 - Docker + Docker Compose.
 
 ## Quick start
@@ -57,6 +57,15 @@ set-server <url>  point this agent at a different server (keeps its node token)
 uninstall  remove container/image/data (with confirmation)
 ```
 
+`set-server` is the manual way to repoint an agent - it always wins over
+anything below. There's also an **automatic** path: if the server this
+agent talks to runs a `migrate-to` migration (Migration 2.0) and reaches
+the cutover step, this agent picks up the new server's address on its own
+next heartbeat, verifies it (checks its `/healthz`, sends an
+authenticated heartbeat with its own token), and only then switches -
+never blindly. Nothing to do on the node itself for that case. See the
+Server's own README for the full Migration 2.0 flow.
+
 ## Configuration (`.env`)
 
 | Variable | Required | Description |
@@ -88,8 +97,9 @@ uninstall  remove container/image/data (with confirmation)
    `/api/v1/events` with the node token, and retries with exponential
    backoff on failure. Successfully delivered events are only then removed
    from the outbox.
-4. A second background task sends a heartbeat (version/IP/hostname) to the
-   Server periodically, so the Server/Telegram/Web Admin can show the node
+4. A second background task sends a heartbeat (version/IP/hostname, plus
+   buffer size, capture status, and more) to the Server periodically, so
+   the Telegram bot can show the node
    as online/offline.
 
 If the outbox fills up (server unreachable for a long time), the oldest

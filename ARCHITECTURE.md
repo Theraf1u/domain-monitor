@@ -623,6 +623,22 @@ Durable bounded local outbox — сердце устойчивости аген�
 ### `0006_events_hits.sql` — счётчик хитов в событии
 Добавляет к `events`: `hits INTEGER NOT NULL DEFAULT 1`. Нужна из-за того, что агент теперь схлопывает повторные хиты одного домена в одну буферизованную строку со счётчиком (см. `agent/app/buffer.py`) — одно полученное событие может представлять больше одного реального хита; используется в `record_event`, `count_events_since`.
 
+### `0007`–`0013` — телеметрия, буфер, фильтры, здоровье нод (кратко, полностью — §12)
+`0007` добавляет `nodes.sending_enabled` (независимо от `monitoring_enabled` — можно продолжать захват, но не слать). `0008` добавляет к `filter_rules`: `enabled`, `comment`, `hits_count`, `last_hit_at`. `0009` добавляет `nodes.last_known_online` (для ровно одного уведомления на переход online↔offline, не на каждый heartbeat). `0010` — расширенная телеметрия агента на `nodes` (uptime/buffer_bytes/buffer_limit_bytes/capture_tls_running/capture_dns_running/last_send_error/last_send_success_at). `0011` создаёт отдельную таблицу `node_health_events` (история переходов, для статистики offline-инцидентов). `0012` добавляет `nodes.buffer_alert_level` (warning/critical-пороги переполнения буфера). `0013` добавляет `nodes.sources_supported`/`sources_enabled` (JSON-массивы — что агент умеет собирать вообще vs. что реально включено сейчас).
+
+### `0014_migration_jobs.sql` — Migration 2.0
+
+**`migration_jobs`**
+| Колонка | Тип | Назначение |
+|---|---|---|
+| `id` | INTEGER PK | |
+| `target_url` | TEXT NOT NULL | Адрес сервера-цели |
+| `status` | TEXT DEFAULT 'pending' | `pending` → `standby` → `cutover` → `completed` (или `cancelled`/`failed` в любой момент) |
+| `created_at` / `updated_at` | TEXT NOT NULL | |
+| `error` | TEXT | Заполняется при переходе в `failed`/`cancelled`, если есть подробности |
+
+"Активная" задача — любая НЕ в терминальном статусе (`completed`/`cancelled`/`failed`); ровно одна активная задача одновременно — это ограничение уровня приложения (`create_migration_job`/`active_migration_job` в `database.py` + `409 CONFLICT` в API), не CHECK-констрейнт в самой таблице. `status='cutover'` — единственное, что реально влияет на поведение системы: heartbeat-эндпоинт (`api/nodes.py`) при этом статусе начинает добавлять `migration_target_url` в ответ каждой ноде.
+
 ---
 
 ## 6. Локальный буфер агента (outbox)
@@ -670,11 +686,11 @@ Durable bounded local outbox — сердце устойчивости аген�
 | `POST /api/v1/nodes` | `X-Admin-Key` | `NodeCreateRequest {name?: str}` | `NodeCreateResponse {id, name, token}` | `409 CONFLICT` — имя уже занято (если `name` передан явно) |
 | `GET /api/v1/nodes` | `X-Admin-Key` | — | `list[NodeResponse]` | — |
 | `GET /api/v1/nodes/{node_id}` | `X-Admin-Key` | — | `NodeResponse` | `404` — нода не найдена |
-| `PATCH /api/v1/nodes/{node_id}` | `X-Admin-Key` | `NodeSettingsUpdateRequest {monitoring_enabled?, notifications_enabled?}` | `NodeResponse` | `404` |
+| `PATCH /api/v1/nodes/{node_id}` | `X-Admin-Key` | `NodeSettingsUpdateRequest {monitoring_enabled?, notifications_enabled?, sending_enabled?}` | `NodeResponse` | `404` |
 | `POST /api/v1/nodes/{node_id}/regenerate-token` | `X-Admin-Key` | — | `NodeCreateResponse` (новый токен) | `404` |
 | `POST /api/v1/nodes/{node_id}/revoke` | `X-Admin-Key` | — | `204 No Content` | `404` |
 | `DELETE /api/v1/nodes/{node_id}` | `X-Admin-Key` | — | `204 No Content` | `404` |
-| `POST /api/v1/nodes/heartbeat` | `Bearer <NODE_TOKEN>` | `HeartbeatRequest {version?, ip?, hostname?, buffer_size?}` | `HeartbeatResponse {monitoring_enabled, sending_enabled}` | `401` — токен неверный/отсутствует; `403` — токен отозван |
+| `POST /api/v1/nodes/heartbeat` | `Bearer <NODE_TOKEN>` | `HeartbeatRequest {version?, ip?, hostname?, buffer_size?, agent_uptime_seconds?, buffer_bytes?, buffer_limit_bytes?, dropped_events_total?, capture_tls_running?, capture_dns_running?, last_send_error?, last_send_success_at?, sources_supported?, sources_enabled?}` (все поля кроме первых четырёх опциональны/аддитивны — старый агент их просто не шлёт) | `HeartbeatResponse {monitoring_enabled, sending_enabled, migration_target_url?}` — последнее поле есть только пока активна задача миграции в статусе `cutover` (Migration 2.0, §9); старый агент, не знающий об этом поле, его просто игнорирует | `401` — токен неверный/отсутствует; `403` — токен отозван |
 
 ### `/api/v1/events` (`server/app/api/events.py`)
 
@@ -696,12 +712,23 @@ Durable bounded local outbox — сердце устойчивости аген�
 |---|---|---|
 | `GET /api/v1/stats` | `X-Admin-Key` | `StatsResponse {nodes_online, nodes_total, unique_domains, events_today, new_domains_today}` |
 
+### `/api/v1/migration` (`server/app/api/migration.py`, Migration 2.0)
+
+Весь роутер защищён `X-Admin-Key` (`dependencies=[Depends(require_admin)]` на уровне роутера, не на каждом эндпоинте отдельно). Тонкий CRUD-слой над таблицей `migration_jobs` — тем же паттерном, что все остальные host-скрипты уже используют вместо прямого доступа к SQLite. Используется CLI-скриптами `migrate_to.sh`/`migrate_cutover.sh`/`migrate_status.sh`/`migrate_finish.sh`/`migrate_cancel.sh` и Telegram-экраном ⚙️ Настройки → 🚚 Миграция.
+
+| Метод и путь | Тело / параметры | Ответ | Коды ошибок |
+|---|---|---|---|
+| `POST /api/v1/migration/jobs` | `{target_url: str}` | `MigrationJobResponse {id, target_url, status, created_at, updated_at, error}` | `409 CONFLICT` — уже есть незавершённая задача (статус не в completed/cancelled/failed) |
+| `GET /api/v1/migration/jobs/active` | — | `MigrationJobResponse \| null` | — |
+| `GET /api/v1/migration/jobs/{id}` | — | `MigrationJobResponse` | `404` |
+| `PATCH /api/v1/migration/jobs/{id}` | `{status: str, error?: str}` | `MigrationJobResponse` | `404`; `422` — статус не из допустимого набора (`pending`/`standby`/`cutover`/`completed`/`cancelled`/`failed`) |
+
 ### Служебные
 
 | Метод и путь | Авторизация | Назначение |
 |---|---|---|
 | `GET /healthz` | нет | `{"status": "ok"}` — используется docker healthcheck и установщиком |
-| `GET /metrics` | нет | Prometheus-метрики (текстовый формат), обновляет gauge'и перед отдачей |
+| `GET /metrics` | нет | Prometheus-метрики (текстовый формат): `events_total`, `new_domains_total`, `watchlist_hits_total`, `ignore_hits_total`, `telegram_errors_total`, `nodes_online`, `nodes_offline`, `nodes_total`, `domains_total`, `database_size_bytes`, `node_buffer_bytes{node_id}`, `events_rate_limited_total`, `backup_result_total{kind,result}`, `migration_active`. Гейджи пересчитываются перед каждой отдачей; ни в одном лейбле нет доменов/файлов/секретов — только фиксированные enum'ы и голый numeric node_id. |
 
 ---
 
@@ -854,6 +881,11 @@ domain-monitor-server restore <f> bash scripts/restore.sh <f>
 domain-monitor-server add-node   bash scripts/add_node.sh
 domain-monitor-server migrate-export        bash scripts/migrate_export.sh
 domain-monitor-server migrate-import <файл> bash scripts/migrate_import.sh <файл>
+domain-monitor-server migrate-to <root@host> [-i key]  bash scripts/migrate_to.sh
+domain-monitor-server migrate-cutover <id>  bash scripts/migrate_cutover.sh <id>
+domain-monitor-server migrate-status [id]   bash scripts/migrate_status.sh [id]
+domain-monitor-server migrate-finish <id>   bash scripts/migrate_finish.sh <id>
+domain-monitor-server migrate-cancel <id>   bash scripts/migrate_cancel.sh <id>
 ```
 Резолвит `PROJECT_DIR` через символическую ссылку (`readlink -f`), чтобы работать при вызове как `domain-monitor-server` из `/usr/local/bin`, а не только изнутри чекаута.
 
@@ -881,7 +913,12 @@ domain-monitor-agent set-server <url> bash scripts/set_server.sh <url>
 - **`update.sh`** — требует root, `git fetch` + `git reset --hard origin/HEAD` (если это git-чекаут), пересобирает образ, перезапускает.
 - **`add_node.sh`** — создаёт ноду через локальный REST API (`POST /api/v1/nodes` с пустым телом → auto-name), печатает готовую однострочную команду установки агента с URL и токеном внутри.
 - **`migrate_export.sh`** — упаковывает `./data` + `.env` в `domain-monitor-migration-<timestamp>.tar.gz` (тот же формат, что и `backup.sh` — пакет миграции ЕСТЬ бэкап, просто предназначенный для другого хоста), печатает пошаговую инструкцию переноса.
-- **`migrate_import.sh <файл>`** — требует root, проверяет наличие `data/domain_monitor.db` внутри архива, сохраняет текущие данные как `*.pre-migration.<timestamp>`, разворачивает пакет, **умно сливает `.env`**: переносит только `BOT_TOKEN`, `ADMIN_ID`, `ADMIN_API_KEY`, `TELEGRAM_PROXY` из пакета, оставляя `PORT`/`PUBLIC_URL` этого сервера нетронутыми; запускает сервер, ждёт готовности до 60с; в конце через `docker exec` заходит в контейнер и печатает Python-скриптом список всех нод, для каждой выводит готовую команду `domain-monitor-agent set-server <новый URL>`.
+- **`migrate_import.sh <файл>`** — требует root, проверяет наличие `data/domain_monitor.db` внутри архива (листинг `tar -tzf` читается в переменную и потом грепается, а НЕ пайпится прямо в `grep -q` — под `set -o pipefail` это гонка: `grep -q` выходит сразу после первого совпадения, `tar` может словить SIGPIPE дописывая остаток листинга, и `pipefail` тогда считает весь пайплайн проваленным, хотя `grep` реально нашёл файл; баг был живым в проде, пойман при тестировании Migration 2.0, см. ниже), сохраняет текущие данные как `*.pre-migration.<timestamp>`, разворачивает пакет, **умно сливает `.env`**: переносит только `BOT_TOKEN`, `ADMIN_ID`, `ADMIN_API_KEY`, `TELEGRAM_PROXY` из пакета, оставляя `PORT`/`PUBLIC_URL` этого сервера нетронутыми; запускает сервер, ждёт готовности до 60с; в конце через `docker exec` заходит в контейнер и печатает Python-скриптом список всех нод, для каждой выводит готовую команду `domain-monitor-agent set-server <новый URL>`.
+- **`migrate_to.sh <root@host> [-i key]`** (Migration 2.0) — требует уже настроенный беспарольный SSH-доступ к цели (никогда не принимает пароль). Проверяет SSH (root, беспарольно), ставит `rsync` при необходимости, собирает пакет миграции (`migrate_export.sh`), копирует ТЕКУЩИЙ код проекта (не полагаясь на доступность GitHub с целевой машины) плюс сам пакет (права 0600) на цель, запускает там `install.sh server-migrate-target <пакет>` — это отдельный нон-интерактивный режим `install.sh`, который резолвит `PROJECT_DIR`, ставит Docker/Compose/UFW при необходимости и передаёт управление `migrate_target_bootstrap.sh`. Тот пишет `.env` С НУЛЯ из пакета (не мастер — там некому отвечать на вопросы): свои `PORT`/`PUBLIC_URL` для новой машины, `BOT_TOKEN`/`ADMIN_ID`/`ADMIN_API_KEY`/`TELEGRAM_PROXY` из пакета, плюс **`TELEGRAM_POLLING_ENABLED=false`** — это и есть standby: API/heartbeat живые для проверки, но `_run_polling_forever()` в `main.py` не запускается вообще, так что конфликта с ещё живым старым сервером за один и тот же bot token быть не может (Telegram отдаёт 409 второму поллеру). `.env` создаётся с `chmod 600` ДО первой записи секретов, а не после (см. §13 про security-проходку). Дожидается `/healthz`, возвращает `MIGRATE_TARGET_URL=...` последней строкой. `migrate_to.sh` дальше сам проверяет `/healthz` уже со своей стороны, создаёт запись в `migration_jobs` через `POST /api/v1/migration/jobs`, переводит её в `standby`.
+- **`migrate_cutover.sh <id>`** — проверяет, что задача в статусе `standby` и цель ещё жива (`/healthz`), переводит статус в `cutover` через `PATCH /api/v1/migration/jobs/{id}`. Само по себе ничего не перезапускает — heartbeat-эндпоинт сервера (`api/nodes.py`) при каждом хартбите смотрит `db.active_migration_job()`, и если статус `cutover` — добавляет `migration_target_url` в ответ. Дальше каждый агент сам решает, переключаться ли (см. §4, `UplinkTask._try_migrate()`).
+- **`migrate_status.sh [id]`** — сравнивает список нод текущего сервера (`GET /api/v1/nodes` локально) со списком нод у цели (тот же `X-Admin-Key`, скопированный в пакет — тот же ключ подходит и туда) — нода, ставшая `online` на цели, считается переключившейся; ещё `online` только на старом — ждёт; не видна нигде — офлайн (честно неизвестно, мигрировала или нет).
+- **`migrate_finish.sh <id>`** — только при статусе `cutover`. Показывает финальный `migrate-status`, спрашивает подтверждение. Затем: выключает `TELEGRAM_POLLING_ENABLED` на ЭТОМ (старом) сервере первым, перезапускает; только потом по SSH включает его на целевом и перезапускает там — никогда не наоборот, иначе окно с двумя поллерами разом. Переводит задачу в `completed`. Никогда не трогает и не удаляет старый сервер/данные.
+- **`migrate_cancel.sh <id>`** — переводит задачу в `cancelled` (кроме уже терминальных статусов). Ноды, уже успевшие переключиться при `cutover`, остаются на новом сервере — отмена не двигает их обратно, только прекращает предлагать переключение оставшимся.
 
 ### `agent/scripts/*.sh`
 - **`lib.sh`** — тот же набор хелперов, что у сервера, за вычетом функций работы с firewall (агенту порт слушать не нужно).
@@ -1001,8 +1038,16 @@ domain-monitor-agent set-server <url> bash scripts/set_server.sh <url>
 | 3 | server | `0004_node_notify_routing.sql` | Добавляет к `nodes`: `notify_destination`, `notify_group_chat_id`, `notify_group_topic_id` |
 | 4 | server | `0005_agent_buffer_size.sql` | Добавляет к `nodes`: `agent_buffer_size` |
 | 5 | server | `0006_events_hits.sql` | Добавляет к `events`: `hits` (учёт схлопнутых на агенте повторов) |
-| 6 | agent | `0001_outbox.sql` | Создаёт `outbox` (локальный буфер отправки) |
-| 7 | agent | `0002_outbox_dedupe.sql` | Добавляет `hits`/`last_occurred_at`, чистит старые дубликаты, добавляет уникальный индекс `(domain, source)` |
+| 6 | server | `0007_node_sending_enabled.sql` | Добавляет к `nodes`: `sending_enabled` (независимо от `monitoring_enabled`) |
+| 7 | server | `0008_filter_rules_extra.sql` | Добавляет к `filter_rules`: `enabled`, `comment`, `hits_count`, `last_hit_at` |
+| 8 | server | `0009_node_health_state.sql` | Добавляет к `nodes`: `last_known_online` (для ровно одного уведомления на переход online↔offline) |
+| 9 | server | `0010_agent_telemetry.sql` | Добавляет к `nodes`: uptime, buffer_bytes/limit, capture_tls_running, capture_dns_running, last_send_error, last_send_success_at |
+| 10 | server | `0011_node_health_events.sql` | Создаёт `node_health_events` (история online/offline-переходов, для раздела Статистики) |
+| 11 | server | `0012_node_buffer_alert_level.sql` | Добавляет к `nodes`: `buffer_alert_level` (для warning/critical-уведомлений о переполнении буфера) |
+| 12 | server | `0013_node_source_capabilities.sql` | Добавляет к `nodes`: `sources_supported`, `sources_enabled` (JSON-массивы) |
+| 13 | server | `0014_migration_jobs.sql` | Создаёт `migration_jobs` (Migration 2.0 — статус pending/standby/cutover/completed/cancelled/failed) |
+| 14 | agent | `0001_outbox.sql` | Создаёт `outbox` (локальный буфер отправки) |
+| 15 | agent | `0002_outbox_dedupe.sql` | Добавляет `hits`/`last_occurred_at`, чистит старые дубликаты, добавляет уникальный индекс `(domain, source)` |
 
 Примечание: в файловой системе сервера отсутствует файл `0002_*.sql` — нумерация в каталоге `server/migrations/` прыгает с `0001` сразу на `0003` (файл `0002` в репозитории физически не существует). Порядок применения определяется алфавитной сортировкой имён файлов в `Database.migrate()`, поэтому пропуск номера не ломает ничего — просто в истории есть "дыра" в нумерации.
 
