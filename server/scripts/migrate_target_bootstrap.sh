@@ -57,6 +57,10 @@ PUBLIC_URL="http://$(curl -s -4 -m 3 ifconfig.me 2>/dev/null || hostname)"
 [ "$PORT" != "80" ] && PUBLIC_URL="${PUBLIC_URL}:${PORT}"
 
 cp "$PROJECT_DIR/.env.example" "$ENV_FILE"
+# Locked down BEFORE any secret is written into it, not after - avoids a
+# window where BOT_TOKEN/ADMIN_API_KEY briefly sit in a world-readable
+# file while the sed/echo calls below fill them in (spec 9).
+chmod 600 "$ENV_FILE"
 sed -i "s|^PORT=.*|PORT=${PORT}|" "$ENV_FILE"
 sed -i "s|^PUBLIC_URL=.*|PUBLIC_URL=${PUBLIC_URL}|" "$ENV_FILE"
 
@@ -74,7 +78,6 @@ done
 # see server/app/main.py / app/config.py. Appended, not sed'd in, since
 # .env.example ships it commented out.
 echo "TELEGRAM_POLLING_ENABLED=false" >>"$ENV_FILE"
-chmod 600 "$ENV_FILE"
 
 echo "[*] Открываю порт в файрволе, если UFW активен ..."
 open_firewall_port "$PORT"

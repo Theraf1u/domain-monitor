@@ -81,6 +81,11 @@ run_wizard() {
     done
 
     cp "$PROJECT_DIR/.env.example" "$ENV_FILE"
+    # Locked down BEFORE any secret is written into it, not after - a
+    # multi-user box could otherwise catch BOT_TOKEN/ADMIN_API_KEY sitting
+    # world-readable for the brief window while the sed calls below fill
+    # them in (spec 2.0 Part 2, section 9).
+    chmod 600 "$ENV_FILE"
     sed -i "s|^ADMIN_API_KEY=.*|ADMIN_API_KEY=${admin_key}|" "$ENV_FILE"
     sed -i "s|^PUBLIC_URL=.*|PUBLIC_URL=${public_url}|" "$ENV_FILE"
     sed -i "s|^PORT=.*|PORT=${port}|" "$ENV_FILE"
@@ -89,7 +94,6 @@ run_wizard() {
     if [ -n "${telegram_proxy:-}" ]; then
         echo "TELEGRAM_PROXY=${telegram_proxy}" >> "$ENV_FILE"
     fi
-    chmod 600 "$ENV_FILE"
 
     if [ -z "${telegram_proxy:-}" ]; then
         if curl -fsS -m 8 "https://api.telegram.org/bot${bot_token}/getMe" | grep -q '"ok":true'; then

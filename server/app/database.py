@@ -43,6 +43,21 @@ def _parse_ts(value: str | None) -> datetime | None:
     return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
 
 
+def _lock_down_db_files(path: str) -> None:
+    """The DB holds every node's domain history plus hashed node tokens -
+    sqlite3.connect() creates the file (and, once WAL mode is on, its
+    -wal/-shm sidecars) at the process umask's default, which is
+    world-readable on plenty of boxes. Called on every connect/reopen
+    (not just first creation) since a fresh install's sidecar files don't
+    exist until the first write, and a restore swaps the file for a
+    backup's copy with its own permissions (spec 2.0 Part 2, section 9)."""
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            os.chmod(path + suffix, 0o600)
+        except FileNotFoundError:
+            pass
+
+
 class Database:
     def __init__(self, path: str) -> None:
         self.path = path
@@ -55,6 +70,7 @@ class Database:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA journal_mode = WAL")
+        _lock_down_db_files(path)
         return conn
 
     def reopen(self) -> None:

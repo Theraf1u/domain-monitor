@@ -17,4 +17,8 @@ tar_args=(-czf "$OUT")
 [ -f .env ] && tar_args+=(.env)
 
 tar "${tar_args[@]}"
+# Contains .env (BOT_TOKEN, ADMIN_API_KEY) - never leave it at the
+# process umask's default (often world-readable) on a multi-user box
+# (spec 2.0 Part 2, section 9).
+chmod 600 "$OUT"
 echo "[OK] Бэкап записан в $OUT ($(du -h "$OUT" | cut -f1))"

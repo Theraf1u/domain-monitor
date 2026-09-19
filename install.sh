@@ -299,11 +299,11 @@ install_both() {
     fi
 
     cp "$PROJECT_DIR/agent/.env.example" "$agent_env"
+    chmod 600 "$agent_env"  # before NODE_TOKEN is written in, not after
     sed -i "s|^SERVER_URL=.*|SERVER_URL=http://127.0.0.1:${port}|" "$agent_env"
     sed -i "s|^NODE_TOKEN=.*|NODE_TOKEN=${token}|" "$agent_env"
     sed -i "s|^NODE_NAME=.*|NODE_NAME=${node_name}|" "$agent_env"
     sed -i "s|^INTERFACE=.*|INTERFACE=${interface}|" "$agent_env"
-    chmod 600 "$agent_env"
 
     if ! (cd "$PROJECT_DIR/agent" && source scripts/lib.sh && compose_build_quiet); then
         echo "[ОШИБКА] Сборка/запуск агента не завершились - см. ошибку выше." >&2

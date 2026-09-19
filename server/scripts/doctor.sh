@@ -65,16 +65,20 @@ else
 fi
 
 # Backup archives, if any exist, should be similarly locked down (spec 9:
-# "проверить права ... backup archives").
-BACKUP_DIR="$PROJECT_DIR/data/backups"
-if [ -d "$BACKUP_DIR" ]; then
+# "проверить права ... backup archives"). Two separate locations exist -
+# $PROJECT_DIR/data/backups (mounted into the container, written by the
+# bot's own automatic Backup Manager) and $PROJECT_DIR/backups (host-only,
+# written by the backup/migrate-export/migrate-to CLI commands) - both
+# can contain .env-derived secrets, so both need checking.
+for BACKUP_DIR in "$PROJECT_DIR/data/backups" "$PROJECT_DIR/backups"; do
+    [ -d "$BACKUP_DIR" ] || continue
     world_readable_backups="$(find "$BACKUP_DIR" -maxdepth 1 -name '*.tar.gz' -perm -044 2>/dev/null | wc -l)"
     if [ "${world_readable_backups:-0}" -eq 0 ]; then
-        ok "Файлы бэкапов не читаются другими пользователями"
+        ok "Файлы бэкапов в $BACKUP_DIR не читаются другими пользователями"
     else
-        fail "$world_readable_backups файл(ов) бэкапа доступны для чтения не только владельцу" "chmod 600 $BACKUP_DIR/*.tar.gz"
+        fail "$world_readable_backups файл(ов) бэкапа в $BACKUP_DIR доступны для чтения не только владельцу" "chmod 600 $BACKUP_DIR/*.tar.gz"
     fi
-fi
+done
 
 # ------------------------------------------------------------------
 # SERVER

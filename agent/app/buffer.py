@@ -47,6 +47,19 @@ def _row_bytes(domain: str, source: str) -> int:
     return len(domain.encode("utf-8")) + len(source.encode("utf-8")) + _ROW_OVERHEAD_BYTES
 
 
+def _lock_down_db_files(path: str) -> None:
+    """This DB holds every domain captured locally while waiting to be
+    sent - sqlite3.connect() creates the file (and, once WAL mode is on,
+    its -wal/-shm sidecars) at the process umask's default, which is
+    world-readable on plenty of boxes. Not just a server-side concern -
+    this is the same sensitive data, just on the node instead."""
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            os.chmod(path + suffix, 0o600)
+        except FileNotFoundError:
+            pass
+
+
 class OutboxEntry:
     __slots__ = ("id", "domain", "source", "occurred_at", "hits")
 
@@ -67,6 +80,7 @@ class Buffer:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode = WAL")
         self._conn.execute("PRAGMA synchronous = NORMAL")
+        _lock_down_db_files(path)
         # All three kept in memory and updated on every insert/update/
         # delete, never re-derived with a table scan except once here at
         # startup - see the module docstring.

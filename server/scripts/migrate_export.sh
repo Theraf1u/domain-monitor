@@ -19,6 +19,9 @@ tar_args=(-czf "$OUT")
 [ -d data ] && tar_args+=(data)
 [ -f .env ] && tar_args+=(.env)
 tar "${tar_args[@]}"
+# Contains .env (BOT_TOKEN, ADMIN_API_KEY) in plain text - never leave it
+# at the process umask's default (spec 2.0 Part 2, section 9).
+chmod 600 "$OUT"
 
 size="$(du -h "$OUT" | cut -f1)"
 

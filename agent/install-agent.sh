@@ -88,11 +88,11 @@ run_wizard() {
     node_label="$(detect_node_ip)"
 
     cp "$PROJECT_DIR/.env.example" "$ENV_FILE"
+    chmod 600 "$ENV_FILE"  # before NODE_TOKEN is written in, not after
     sed -i "s|^SERVER_URL=.*|SERVER_URL=${server_url}|" "$ENV_FILE"
     sed -i "s|^NODE_TOKEN=.*|NODE_TOKEN=${node_token}|" "$ENV_FILE"
     sed -i "s|^NODE_NAME=.*|NODE_NAME=${node_label}|" "$ENV_FILE"
     sed -i "s|^INTERFACE=.*|INTERFACE=any|" "$ENV_FILE"
-    chmod 600 "$ENV_FILE"
 
     echo "Метка ноды (для локальных логов): ${node_label}, интерфейс: any (поменять можно потом в .env)"
     echo "В боте нода видна под своим временным именем, при первом подключении сама переименуется в свой IP."
