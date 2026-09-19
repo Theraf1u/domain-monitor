@@ -60,7 +60,7 @@ README for the agent installer.
   takes its own pre-restore safety snapshot first and rolls back
   automatically if anything after that fails. Manage from the bot's
   💾 Бэкапы menu, or `domain-monitor-server backup`/`restore <file>` on
-  the CLI.
+  the CLI. Full guide: **[docs/BACKUP.md](../docs/BACKUP.md)**.
 - **Migration 2.0**: `domain-monitor-server migrate-to root@NEW_HOST`
   automates moving the whole control center to a fresh server - SSHes in,
   bootstraps Docker/Compose/UFW there if needed, brings the new server up
@@ -194,47 +194,16 @@ auto-restarts its polling loop if the connection ever drops.
 
 ## Migration 2.0
 
-Moving the whole control center (bot + API + data) to a new server, with
-every agent switching over automatically:
-
 ```bash
 domain-monitor-server migrate-to root@NEW_HOST   # needs password-less SSH to it
 ```
 
-This bootstraps Docker/Compose/UFW on the target if they're missing
-(never reinstalls what's already there), ships a migration package
-(same format as `migrate-export`) and the current code, and brings the
-target up in **standby**: its API and heartbeat endpoint work (so it can
-be verified before anything depends on it), but Telegram polling is off,
-so it can never conflict with this still-fully-running server for the
-same bot token. Prints a job id.
-
-```bash
-domain-monitor-server migrate-cutover <job_id>
-```
-
-Nothing restarts. This just tells the heartbeat endpoint to start
-including the new server's address in its response - each agent
-verifies the target itself (checks its `/healthz`, sends an authenticated
-heartbeat with its own token) before persisting the switch and pointing
-itself there, on its own next heartbeat cycle. An agent that fails that
-check, or one running old code that doesn't understand the field yet,
-just keeps working against this server exactly as before - nothing here
-is a hard cutover.
-
-```bash
-domain-monitor-server migrate-status <job_id>    # ✅ migrated / 🔄 waiting / 🔴 offline, per node
-domain-monitor-server migrate-finish <job_id>    # once you're satisfied: switches the bot itself
-domain-monitor-server migrate-cancel <job_id>    # stop offering the new address to any more agents
-```
-
-`migrate-finish` turns Telegram polling off on THIS server first, then on
-on the new one - never the other way round, so there's no window with
-both polling the same bot token. It never touches or deletes this
-server's own data; tearing the old one down (if you want to) is a
-separate, manual `uninstall`.
-
-The same status is also in the bot itself: ⚙️ Настройки → 🚚 Миграция.
+Moves the whole control center (bot + API + data) to a new server, with
+every agent verifying and switching over on its own - no manual
+per-node commands, no window where two servers poll the same Telegram
+bot token, nothing touched on the old server until you explicitly say
+so. Full walkthrough (options, staged cutover, rollback, manual
+`migrate-export`/`migrate-import` fallback): **[docs/MIGRATION.md](../docs/MIGRATION.md)**.
 
 ## Architecture notes
 
