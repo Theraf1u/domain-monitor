@@ -104,7 +104,11 @@ PORT="$(grep -oP '^PORT=\K.*' "$ENV_FILE" 2>/dev/null || echo 8280)"
 PUBLIC_URL="$(grep -oP '^PUBLIC_URL=\K.*' "$ENV_FILE" 2>/dev/null || echo "http://localhost:${PORT}")"
 
 echo "[*] Запускаю сервер с перенесёнными данными ..."
-compose up -d
+# --force-recreate: `compose up -d` alone doesn't reliably detect that
+# .env's CONTENT changed (BOT_TOKEN/ADMIN_ID/ADMIN_API_KEY were just
+# rewritten above) - see migrate_finish.sh's comment for how this was
+# caught live.
+compose up -d --force-recreate
 
 echo "[*] Жду готовности ..."
 ready=0

@@ -12,6 +12,15 @@
 # Never touches this server's own data or uninstalls anything - spec 3:
 # "никогда не удалять старый сервер/данные автоматически". The admin
 # decides when (and whether) to tear the old one down, by hand.
+#
+# Both compose calls below use --force-recreate: a real bug caught during
+# live end-to-end testing (2026-09-19) - `docker compose up -d` alone
+# does NOT reliably detect that env_file's CONTENT changed (only that the
+# reference to it is unchanged), so a plain `compose up -d` after editing
+# TELEGRAM_POLLING_ENABLED in .env left the OLD container running for
+# over a minute with polling still active, invisibly - the .env said
+# false, `docker exec ... env` showed the flag wasn't set at all inside
+# the actual running process. --force-recreate closes that gap.
 set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$PROJECT_DIR/.env"
@@ -68,7 +77,7 @@ if grep -q '^TELEGRAM_POLLING_ENABLED=' "$ENV_FILE"; then
 else
     echo "TELEGRAM_POLLING_ENABLED=false" >>"$ENV_FILE"
 fi
-(cd "$PROJECT_DIR" && compose up -d)
+(cd "$PROJECT_DIR" && compose up -d --force-recreate)
 
 echo "[*] Жду, пока старый сервер снова ответит (уже без опроса Telegram) ..."
 for _ in $(seq 1 30); do
@@ -78,7 +87,7 @@ done
 
 echo "[*] Включаю Telegram-опрос на НОВОМ сервере ($target_host) ..."
 ssh "${SSH_OPTS[@]}" "root@${target_host}" \
-    "sed -i 's|^TELEGRAM_POLLING_ENABLED=.*|TELEGRAM_POLLING_ENABLED=true|' /opt/domain-monitor/server/.env && cd /opt/domain-monitor/server && (docker compose up -d || docker-compose up -d)"
+    "sed -i 's|^TELEGRAM_POLLING_ENABLED=.*|TELEGRAM_POLLING_ENABLED=true|' /opt/domain-monitor/server/.env && cd /opt/domain-monitor/server && (docker compose up -d --force-recreate || docker-compose up -d --force-recreate)"
 
 api -X PATCH "http://127.0.0.1:${PORT}/api/v1/migration/jobs/${JOB_ID}" \
     -H "Content-Type: application/json" -d '{"status":"completed"}' >/dev/null

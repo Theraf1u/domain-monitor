@@ -39,5 +39,5 @@ compose stop 2>/dev/null || true
 mv -f data "data.pre-restore.$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
 tar -xzf "$ARCHIVE" -C "$PROJECT_DIR"
 
-compose up -d
+compose up -d --force-recreate  # the archive may include a different .env - see server/scripts/migrate_finish.sh's comment
 echo "[OK] Восстановление завершено, контейнер перезапущен."

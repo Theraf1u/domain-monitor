@@ -37,5 +37,13 @@ fi
 
 echo "SERVER_URL: ${OLD_URL} -> ${NEW_URL}"
 echo "[*] Перезапускаю агент ..."
-(cd "$PROJECT_DIR" && compose up -d)
+# --force-recreate: a real bug caught during live Migration 2.0 testing
+# (2026-09-19) - `docker compose up -d` alone does not reliably detect
+# that .env's CONTENT changed (only that the file reference is
+# unchanged), so a plain `compose up -d` after this script's own sed
+# above could leave the agent running against the OLD SERVER_URL
+# indefinitely, invisibly - .env says the new URL, but the actual
+# running process never picked it up. See server/scripts/migrate_finish.sh
+# for the full story (same bug, caught there first).
+(cd "$PROJECT_DIR" && compose up -d --force-recreate)
 echo "[OK] Агент теперь отправляет данные на ${NEW_URL}. Токен ноды не менялся."
