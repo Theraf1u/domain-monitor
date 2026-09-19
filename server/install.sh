@@ -60,6 +60,19 @@ run_wizard() {
     [ "$port" != "80" ] && public_url="${public_url}:${port}"
 
     echo "Адрес: $public_url   (поменять можно потом в .env)"
+    # spec 2.0 Part 2, section 3.7 "stable hostname": PUBLIC_URL is baked
+    # into every agent's SERVER_URL - a raw IP means a future server
+    # move (Migration 2.0's migrate-to, or just switching hosting
+    # providers) requires every agent to actually pick up the new
+    # address (which Migration 2.0 does automatically, but a DNS name
+    # would let it happen without touching a single agent - see
+    # `migrate-to --target-public-url`).
+    if [[ "$public_url" =~ ^https?://[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(:[0-9]+)?$ ]]; then
+        echo "💡 Это голый IP. Если заведёшь DNS A-запись на него (например monitor.example.com)"
+        echo "   и укажешь PUBLIC_URL=http://monitor.example.com:$port в .env - при будущем переносе"
+        echo "   сервера (domain-monitor-server migrate-to) можно будет просто поменять DNS,"
+        echo "   не трогая агентов вообще. Необязательно, можно сделать и позже."
+    fi
     open_firewall_port "$port"
     echo
 

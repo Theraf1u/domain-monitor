@@ -53,6 +53,16 @@ if [ -z "$TARGET" ]; then
 fi
 [[ "$TARGET" == *"@"* ]] || TARGET="root@${TARGET}"
 
+# spec 3.7 "stable hostname": nudge toward --target-public-url if it
+# wasn't given - a DNS name on the new server means a LATER migration
+# needs only a DNS change, not another migrate-to.
+if [ -z "$TARGET_PUBLIC_URL" ]; then
+    echo "💡 Без --target-public-url новый сервер получит PUBLIC_URL по своему голому IP."
+    echo "   Если заведёшь DNS A-запись на новый сервер заранее, можно передать её:"
+    echo "   migrate-to $TARGET --target-public-url http://monitor.example.com:8280"
+    echo
+fi
+
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -p "$SSH_PORT")
 [ -n "$SSH_KEY" ] && SSH_OPTS+=(-i "$SSH_KEY")
 # scp/rsync's ssh transport takes -P (capital) for the port, not -p.
