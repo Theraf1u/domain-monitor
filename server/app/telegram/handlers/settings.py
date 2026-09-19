@@ -482,6 +482,46 @@ async def cb_settings_updates_check(call: CallbackQuery, config: Config) -> None
     await cb_settings_updates(call, config)
 
 
+@router.callback_query(F.data == "settings_updates_how_to_update")
+async def cb_settings_updates_how_to_update(call: CallbackQuery) -> None:
+    # Same self-acting limitation as Миграция (see cb_migration_finish_help
+    # above): pulling new code, rebuilding the image, and restarting THIS
+    # SAME container from inside itself isn't something this process can
+    # safely do to itself - and doing it via the read-only Docker socket
+    # would mean using it for exactly the create/rebuild actions
+    # docker_info.py deliberately never issues (see that module's
+    # docstring). Stays a printed command, not a fake button.
+    await call.message.edit_text(
+        "⬆️ <b>Обновить Server</b>\n\n"
+        "Обновление (git pull + пересборка + перезапуск) нельзя запустить "
+        "из самого бота - пришлось бы пересобирать и перезапускать тот же "
+        "контейнер, в котором бот и работает. Выполни на сервере:\n\n"
+        "<code>domain-monitor-server update</code>\n\n"
+        "Заберёт актуальный код, пересоберёт образ, перезапустит контейнер. "
+        "Бот станет недоступен на несколько секунд во время перезапуска.",
+        parse_mode="HTML", reply_markup=kb.settings_updates_info_menu(),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "settings_updates_autoupdate")
+async def cb_settings_updates_autoupdate(call: CallbackQuery) -> None:
+    # Autoupdate is a host crontab entry (see install.sh's
+    # enable_auto_update()/CRON_MARKER) - the container has no access to
+    # the host's crontab at all (no mount, no shared PID namespace), so
+    # there is genuinely nothing here to read or toggle from inside it.
+    await call.message.edit_text(
+        "⏰ <b>Автообновление</b>\n\n"
+        "Статус автообновления (crontab на хосте) не виден изнутри "
+        "контейнера - управляется только на самом сервере:\n\n"
+        "<code>dm</code> → 6) Управление скриптом → Автообновление\n\n"
+        "Там же лог последнего запуска: <code>auto-update.log</code> "
+        "в папке проекта.",
+        parse_mode="HTML", reply_markup=kb.settings_updates_info_menu(),
+    )
+    await call.answer()
+
+
 # ------------------------------------------------------------------
 # 1.6 / spec 3.6 Миграция
 #
@@ -498,17 +538,10 @@ async def cb_settings_updates_check(call: CallbackQuery, config: Config) -> None
 # instead of faked.
 # ------------------------------------------------------------------
 
-async def _migration_status_text(job: dict, config: Config) -> str:
-    lines = [
-        "🚚 <b>Миграция</b>\n",
-        f"Задача #{job['id']}, статус: <b>{job['status']}</b>",
-        f"Цель: <code>{job['target_url']}</code>",
-        f"Создана: {job['created_at']}",
-    ]
-    if job.get("error"):
-        lines.append(f"Ошибка: {job['error']}")
-    lines.append("")
-
+async def _fetch_old_and_new_nodes(job: dict, config: Config) -> tuple[list, list] | None:
+    """None means the comparison itself failed (network error reaching
+    one side) - callers must show that honestly rather than rendering an
+    empty/misleading node list."""
     import aiohttp
 
     try:
@@ -524,8 +557,26 @@ async def _migration_status_text(job: dict, config: Config) -> str:
             ) as resp:
                 new_nodes = await resp.json() if resp.status == 200 else []
     except Exception:
+        return None
+    return old_nodes, new_nodes
+
+
+async def _migration_status_text(job: dict, config: Config) -> str:
+    lines = [
+        "🚚 <b>Миграция</b>\n",
+        f"Задача #{job['id']}, статус: <b>{job['status']}</b>",
+        f"Цель: <code>{job['target_url']}</code>",
+        f"Создана: {job['created_at']}",
+    ]
+    if job.get("error"):
+        lines.append(f"Ошибка: {job['error']}")
+    lines.append("")
+
+    fetched = await _fetch_old_and_new_nodes(job, config)
+    if fetched is None:
         lines.append("⚠️ Не удалось получить список нод (у себя или у цели) - показан только статус задачи.")
         return "\n".join(lines)
+    old_nodes, new_nodes = fetched
 
     new_by_id = {n["id"]: n for n in new_nodes}
     migrated = waiting = offline = 0
@@ -598,6 +649,47 @@ async def cb_migration_cutover(call: CallbackQuery, db: Database, config: Config
     db.set_migration_job_status(job_id, "cutover")
     await call.answer("Переключение начато")
     await cb_settings_migration(call, db, config)
+
+
+@router.callback_query(F.data.startswith("mig_stragglers:"))
+async def cb_migration_stragglers(call: CallbackQuery, db: Database, config: Config) -> None:
+    """spec 3.5's [📋 Команды для оставшихся]: a node whose agent predates
+    Migration 2.0 (or is just offline right now) will never auto-switch -
+    it needs the manual `set-server` fallback, same as before this
+    feature existed. Prints one ready command per node that hasn't
+    already switched."""
+    job_id = call.data.split(":", 1)[1]
+    job = db.get_migration_job(int(job_id))
+    if job is None:
+        await call.answer("Задача не найдена.", show_alert=True)
+        return
+
+    fetched = await _fetch_old_and_new_nodes(job, config)
+    if fetched is None:
+        await call.answer("Не удалось получить список нод - попробуй обновить и повтори.", show_alert=True)
+        return
+    old_nodes, new_nodes = fetched
+    new_by_id = {n["id"]: n for n in new_nodes}
+
+    remaining = [n for n in old_nodes if not (new_by_id.get(n["id"]) and new_by_id[n["id"]].get("online"))]
+    if not remaining:
+        text = "📋 <b>Команды для оставшихся</b>\n\nВсе ноды уже переключились - выполнять вручную нечего."
+    else:
+        lines = [
+            "📋 <b>Команды для оставшихся</b>\n",
+            "Эти ноды ещё не переключились сами (офлайн сейчас или Agent "
+            "слишком старый и не умеет авто-переключение). Выполни на каждой "
+            "ноде - токен не меняется:\n",
+        ]
+        for n in remaining:
+            lines.append(f"  # {n['name']}")
+            lines.append(f"  <code>domain-monitor-agent set-server {job['target_url']}</code>")
+        text = "\n".join(lines)
+
+    await call.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.settings_migration_active_menu(int(job_id), job["status"]),
+    )
+    await call.answer()
 
 
 @router.callback_query(F.data.startswith("mig_finish_help:"))

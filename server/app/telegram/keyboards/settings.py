@@ -116,9 +116,18 @@ def settings_server_menu() -> InlineKeyboardMarkup:
 
 def settings_updates_menu() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    b.button(text="🔄 Проверить снова", callback_data="settings_updates_check", style="primary")
+    b.button(text="🔎 Проверить обновления", callback_data="settings_updates_check", style="primary")
+    b.button(text="⬆️ Обновить Server", callback_data="settings_updates_how_to_update", style="primary")
+    b.button(text="⏰ Автообновление", callback_data="settings_updates_autoupdate", style="primary")
     b.button(text="⬅️ Назад", callback_data="settings")
-    b.adjust(1, 1)
+    b.adjust(1, 1, 1, 1)
+    return b.as_markup()
+
+
+def settings_updates_info_menu() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="⬅️ Назад", callback_data="settings_updates")
+    b.adjust(1)
     return b.as_markup()
 
 
@@ -139,7 +148,8 @@ def settings_migration_active_menu(job_id: int, status: str) -> InlineKeyboardMa
     if status == "standby":
         b.button(text="✅ Начать переключение", callback_data=f"mig_cutover_confirm:{job_id}", style="primary")
     if status == "cutover":
-        b.button(text="📋 Как завершить", callback_data=f"mig_finish_help:{job_id}", style="primary")
+        b.button(text="📋 Команды для оставшихся", callback_data=f"mig_stragglers:{job_id}", style="primary")
+        b.button(text="✅ Завершить", callback_data=f"mig_finish_help:{job_id}", style="primary")
     if status not in ("completed", "cancelled", "failed"):
         b.button(text="❌ Отменить миграцию", callback_data=f"mig_cancel_confirm:{job_id}", style="danger")
     b.button(text="⬅️ Назад", callback_data="settings")
