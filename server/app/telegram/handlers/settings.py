@@ -386,3 +386,167 @@ async def cb_settings_about(call: CallbackQuery, db: Database, config: Config) -
     )
     await call.message.edit_text(text, parse_mode="HTML", reply_markup=kb.settings_about_menu())
     await call.answer()
+
+
+# ------------------------------------------------------------------
+# 1.6 / spec 3.6 Миграция
+#
+# The bot runs inside the SAME container as the API, so it can read/write
+# migration_jobs directly via `db` (no HTTP round-trip needed for that
+# part) and it CAN make an outbound HTTP call to a migration target's own
+# admin API to check node status - that's just a network request, no
+# filesystem/SSH access required. What it genuinely cannot do from in
+# here: start a migration (`migrate-to` needs host-level SSH to a brand
+# new server) or finish one (flipping ITS OWN Telegram polling off means
+# restarting this very container with a changed .env, which the bot has
+# no access to edit - see runtime_config.py's docstring in the agent for
+# the same container-boundary reasoning). Both are pointed at the CLI
+# instead of faked.
+# ------------------------------------------------------------------
+
+async def _migration_status_text(job: dict, config: Config) -> str:
+    lines = [
+        "🚚 <b>Миграция</b>\n",
+        f"Задача #{job['id']}, статус: <b>{job['status']}</b>",
+        f"Цель: <code>{job['target_url']}</code>",
+        f"Создана: {job['created_at']}",
+    ]
+    if job.get("error"):
+        lines.append(f"Ошибка: {job['error']}")
+    lines.append("")
+
+    import aiohttp
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"http://127.0.0.1:{config.port}/api/v1/nodes",
+                headers={"X-Admin-Key": config.admin_api_key}, timeout=aiohttp.ClientTimeout(total=5),
+            ) as resp:
+                old_nodes = await resp.json() if resp.status == 200 else []
+            async with session.get(
+                f"{job['target_url']}/api/v1/nodes",
+                headers={"X-Admin-Key": config.admin_api_key}, timeout=aiohttp.ClientTimeout(total=8),
+            ) as resp:
+                new_nodes = await resp.json() if resp.status == 200 else []
+    except Exception:
+        lines.append("⚠️ Не удалось получить список нод (у себя или у цели) - показан только статус задачи.")
+        return "\n".join(lines)
+
+    new_by_id = {n["id"]: n for n in new_nodes}
+    migrated = waiting = offline = 0
+    for n in old_nodes:
+        target_copy = new_by_id.get(n["id"])
+        if target_copy and target_copy.get("online"):
+            lines.append(f"  ✅ {n['name']} - переключилась")
+            migrated += 1
+        elif n.get("online"):
+            lines.append(f"  🔄 {n['name']} - ещё на старом сервере")
+            waiting += 1
+        else:
+            lines.append(f"  🔴 {n['name']} - офлайн (не видна нигде)")
+            offline += 1
+    lines.append(f"\nИтого: {migrated} переключились, {waiting} ждут, {offline} офлайн (из {len(old_nodes)})")
+    return "\n".join(lines)
+
+
+@router.callback_query(F.data == "settings_migration")
+async def cb_settings_migration(call: CallbackQuery, db: Database, config: Config) -> None:
+    job = db.active_migration_job()
+    if job is None:
+        await call.message.edit_text(
+            "🚚 <b>Миграция</b>\n\n"
+            "Сейчас нет активной задачи миграции.\n\n"
+            "Начать перенос на другой сервер можно только с самого сервера "
+            "(нужен SSH-доступ к новому хосту, недоступный изнутри контейнера):\n"
+            "<code>domain-monitor-server migrate-to root@NEW_HOST</code>",
+            parse_mode="HTML", reply_markup=kb.settings_migration_none_menu(),
+        )
+        await call.answer()
+        return
+    text = await _migration_status_text(job, config)
+    await call.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.settings_migration_active_menu(job["id"], job["status"]),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("mig_refresh:"))
+async def cb_migration_refresh(call: CallbackQuery, db: Database, config: Config) -> None:
+    await call.answer("Обновляю...")
+    await cb_settings_migration(call, db, config)
+
+
+@router.callback_query(F.data.startswith("mig_cutover_confirm:"))
+async def cb_migration_cutover_confirm(call: CallbackQuery) -> None:
+    job_id = call.data.split(":", 1)[1]
+    await call.message.edit_text(
+        "⚠️ <b>Начать переключение агентов?</b>\n\n"
+        "Каждая нода при своём следующем heartbeat сама проверит новый сервер "
+        "и переключится - без ручных действий на нодах. Этот сервер продолжит "
+        "работать как обычно, пока ты не выполнишь завершение (Telegram-бот "
+        "переключается отдельным шагом, командой на сервере).",
+        parse_mode="HTML",
+        reply_markup=kb.confirm_keyboard(
+            "✅ Да, начать переключение", f"mig_cutover:{job_id}", f"mig_refresh:{job_id}",
+        ),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("mig_cutover:"))
+async def cb_migration_cutover(call: CallbackQuery, db: Database, config: Config) -> None:
+    job_id = int(call.data.split(":", 1)[1])
+    job = db.get_migration_job(job_id)
+    if job is None or job["status"] != "standby":
+        await call.answer("Задача не в статусе 'standby' - обнови экран.", show_alert=True)
+        return
+    db.set_migration_job_status(job_id, "cutover")
+    await call.answer("Переключение начато")
+    await cb_settings_migration(call, db, config)
+
+
+@router.callback_query(F.data.startswith("mig_finish_help:"))
+async def cb_migration_finish_help(call: CallbackQuery) -> None:
+    job_id = call.data.split(":", 1)[1]
+    await call.message.edit_text(
+        "📋 <b>Как завершить миграцию</b>\n\n"
+        "Переключение Telegram-бота нельзя сделать из самого бота (пришлось бы "
+        "перезапустить этот же контейнер, а .env ему изнутри не изменить).\n\n"
+        "Проверь, что все ноды переключились (🔄 Обновить), затем выполни на "
+        "сервере:\n"
+        f"<code>domain-monitor-server migrate-finish {job_id}</code>\n\n"
+        "Это выключит Telegram-опрос здесь и включит на новом сервере - "
+        "переписка с ботом продолжится уже там.",
+        parse_mode="HTML", reply_markup=kb.settings_migration_active_menu(int(job_id), "cutover"),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("mig_cancel_confirm:"))
+async def cb_migration_cancel_confirm(call: CallbackQuery) -> None:
+    job_id = call.data.split(":", 1)[1]
+    await call.message.edit_text(
+        "⚠️ <b>Отменить миграцию?</b>\n\n"
+        "Ноды, которые уже успели переключиться на новый сервер, там и "
+        "останутся - отмена не двигает их обратно, только останавливает "
+        "переключение оставшихся.",
+        parse_mode="HTML",
+        reply_markup=kb.confirm_keyboard(
+            "❌ Да, отменить", f"mig_cancel:{job_id}", f"mig_refresh:{job_id}",
+        ),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("mig_cancel:"))
+async def cb_migration_cancel(call: CallbackQuery, db: Database, config: Config) -> None:
+    job_id = int(call.data.split(":", 1)[1])
+    job = db.get_migration_job(job_id)
+    if job is None or job["status"] in ("completed", "cancelled", "failed"):
+        await call.answer("Задача уже в конечном статусе.", show_alert=True)
+        await cb_settings_migration(call, db, config)
+        return
+    db.set_migration_job_status(job_id, "cancelled")
+    await call.answer("Миграция отменена")
+    await cb_settings_migration(call, db, config)

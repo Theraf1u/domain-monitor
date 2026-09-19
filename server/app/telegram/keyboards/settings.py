@@ -1,8 +1,8 @@
 """Keyboards for the "⚙️ Настройки" section (spec 2.0 Part 2, section 1):
 a hub screen linking to Сервер/Ноды по умолчанию/Часовой пояс/Хранение
-данных/Администраторы/Безопасность/Диагностика/О системе. Docker-UFW/
-Обновления/Миграция aren't linked from the hub yet - those are still-
-pending later stages (6/7 in the spec's own execution order); adding a
+данных/Администраторы/Безопасность/Диагностика/О системе/Миграция.
+Docker-UFW status and system-update UI still aren't linked from the hub -
+those are later stages (6) in the spec's own execution order; adding a
 button that opens nothing real would be exactly the "no dead screens, no
 fake functions" rule this whole project has followed.
 """
@@ -23,11 +23,12 @@ def settings_menu(watchlist_enabled: bool) -> InlineKeyboardMarkup:
     b.button(text="👥 Администраторы", callback_data="settings_admins", style="primary")
     b.button(text="🔐 Безопасность", callback_data="settings_security", style="primary")
     b.button(text="🩺 Диагностика", callback_data="settings_diagnostics", style="primary")
+    b.button(text="🚚 Миграция", callback_data="settings_migration", style="primary")
     b.button(text="ℹ️ О системе", callback_data="settings_about", style="primary")
     wl_label = _toggle_label("Watch-уведомления включены", "Watch-уведомления выключены", watchlist_enabled)
     b.button(text=wl_label, callback_data="settings_toggle_watchlist", style=_toggle_style(watchlist_enabled))
     b.button(text="⬅️ Назад", callback_data="main")
-    b.adjust(1, 1, 1, 1, 1, 1, 1, 1, 1, 1)
+    b.adjust(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1)
     return b.as_markup()
 
 
@@ -107,6 +108,31 @@ def settings_about_menu() -> InlineKeyboardMarkup:
 
 def settings_server_menu() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
+    b.button(text="⬅️ Назад", callback_data="settings")
+    b.adjust(1)
+    return b.as_markup()
+
+
+def settings_migration_none_menu() -> InlineKeyboardMarkup:
+    """No active job - `migrate-to` itself needs host-level SSH access
+    the bot container doesn't have (spec 3: no arbitrary remote shell
+    from the container), so starting one is CLI-only. Nothing to act on
+    here but going back."""
+    b = InlineKeyboardBuilder()
+    b.button(text="⬅️ Назад", callback_data="settings")
+    b.adjust(1)
+    return b.as_markup()
+
+
+def settings_migration_active_menu(job_id: int, status: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="🔄 Обновить", callback_data=f"mig_refresh:{job_id}", style="primary")
+    if status == "standby":
+        b.button(text="✅ Начать переключение", callback_data=f"mig_cutover_confirm:{job_id}", style="primary")
+    if status == "cutover":
+        b.button(text="📋 Как завершить", callback_data=f"mig_finish_help:{job_id}", style="primary")
+    if status not in ("completed", "cancelled", "failed"):
+        b.button(text="❌ Отменить миграцию", callback_data=f"mig_cancel_confirm:{job_id}", style="danger")
     b.button(text="⬅️ Назад", callback_data="settings")
     b.adjust(1)
     return b.as_markup()
