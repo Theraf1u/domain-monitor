@@ -1,0 +1,80 @@
+<svg viewBox="0 0 480 700" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#08080d"/>
+      <stop offset="100%" stop-color="#12111f"/>
+    </linearGradient>
+    <radialGradient id="orbBlue" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="orbPurple" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#a855f7" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#a855f7" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="blurBig" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="50"/>
+    </filter>
+    <linearGradient id="glassFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.09"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.03"/>
+    </linearGradient>
+    <linearGradient id="btnFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.13"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.04"/>
+    </linearGradient>
+    <clipPath id="phoneClip"><rect x="20" y="20" width="440" height="660" rx="42"/></clipPath>
+  </defs>
+
+  <rect width="480" height="700" fill="#000"/>
+  <rect x="20" y="20" width="440" height="660" rx="42" fill="url(#bg)"/>
+  <g clip-path="url(#phoneClip)">
+    <circle cx="90" cy="90" r="140" fill="url(#orbBlue)" filter="url(#blurBig)"/>
+    <circle cx="420" cy="600" r="160" fill="url(#orbPurple)" filter="url(#blurBig)"/>
+  </g>
+  <rect x="20" y="20" width="440" height="660" rx="42" fill="none" stroke="#ffffff" stroke-opacity="0.12" stroke-width="2"/>
+
+  <!-- chat bubble: dashboard message -->
+  <rect x="44" y="70" width="392" height="330" rx="26" fill="url(#glassFill)" stroke="#ffffff" stroke-opacity="0.14"/>
+  <text x="68" y="110" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', sans-serif" font-size="20" font-weight="700" fill="#ffffff">🖥 Domain Monitor</text>
+
+  <text x="68" y="145" font-family="-apple-system, sans-serif" font-size="15" fill="#cdd7f5">🟢 Сервер работает</text>
+  <text x="68" y="170" font-family="-apple-system, sans-serif" font-size="15" fill="#cdd7f5">📡 Ноды: <tspan fill="#34d399" font-weight="700">8 / 10</tspan> online</text>
+  <text x="68" y="195" font-family="-apple-system, sans-serif" font-size="15" fill="#cdd7f5">🌐 Доменов сегодня: 12 481</text>
+  <text x="68" y="220" font-family="-apple-system, sans-serif" font-size="15" fill="#cdd7f5">📥 Буфер нод: 318 событий</text>
+  <text x="68" y="245" font-family="-apple-system, sans-serif" font-size="15" fill="#cdd7f5">🔔 Уведомления: включены</text>
+
+  <!-- button grid -->
+  <g font-family="-apple-system, sans-serif" font-size="15" font-weight="600" fill="#ffffff">
+    <rect x="68" y="268" width="168" height="44" rx="14" fill="url(#btnFill)" stroke="#ffffff" stroke-opacity="0.12"/>
+    <text x="152" y="295" text-anchor="middle">📡 Ноды</text>
+    <rect x="244" y="268" width="168" height="44" rx="14" fill="url(#btnFill)" stroke="#ffffff" stroke-opacity="0.12"/>
+    <text x="328" y="295" text-anchor="middle">🌐 Домены</text>
+
+    <rect x="68" y="320" width="168" height="44" rx="14" fill="url(#btnFill)" stroke="#ffffff" stroke-opacity="0.12"/>
+    <text x="152" y="347" text-anchor="middle">📊 Статистика</text>
+    <rect x="244" y="320" width="168" height="44" rx="14" fill="url(#btnFill)" stroke="#ffffff" stroke-opacity="0.12"/>
+    <text x="328" y="347" text-anchor="middle">🔔 Уведомления</text>
+  </g>
+
+  <!-- second bubble: node card -->
+  <rect x="44" y="418" width="392" height="220" rx="26" fill="url(#glassFill)" stroke="#ffffff" stroke-opacity="0.14"/>
+  <text x="68" y="455" font-family="-apple-system, sans-serif" font-size="18" font-weight="700" fill="#ffffff">📡 Germany</text>
+  <circle cx="380" cy="449" r="6" fill="#34d399"/>
+  <text x="392" y="454" font-family="-apple-system, sans-serif" font-size="13" fill="#34d399">ONLINE</text>
+
+  <text x="68" y="482" font-family="-apple-system, sans-serif" font-size="13" fill="#9fb0d8">IP: 1.2.3.4 · Agent v2.1.0</text>
+  <text x="68" y="504" font-family="-apple-system, sans-serif" font-size="13" fill="#9fb0d8">Последний heartbeat: 8 сек назад</text>
+  <text x="68" y="526" font-family="-apple-system, sans-serif" font-size="13" fill="#9fb0d8">Буфер: 34 события, 2.8 MB / 1 GB</text>
+
+  <g font-family="-apple-system, sans-serif" font-size="13" font-weight="600" fill="#ffffff">
+    <rect x="68" y="546" width="110" height="36" rx="12" fill="url(#btnFill)" stroke="#ffffff" stroke-opacity="0.12"/>
+    <text x="123" y="569" text-anchor="middle">⏸ Мониторинг</text>
+    <rect x="188" y="546" width="110" height="36" rx="12" fill="url(#btnFill)" stroke="#ffffff" stroke-opacity="0.12"/>
+    <text x="243" y="569" text-anchor="middle">🧪 Проверить</text>
+    <rect x="308" y="546" width="108" height="36" rx="12" fill="url(#btnFill)" stroke="#ffffff" stroke-opacity="0.12"/>
+    <text x="362" y="569" text-anchor="middle">⬅️ Назад</text>
+  </g>
+
+  <text x="240" y="660" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="13" fill="#7f93c4" opacity="0.8">Telegram — единственный интерфейс, браузер не нужен</text>
+</svg>

@@ -1,0 +1,94 @@
+<svg viewBox="0 0 1000 560" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#08080d"/>
+      <stop offset="100%" stop-color="#111122"/>
+    </linearGradient>
+    <radialGradient id="orbGreen" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#22c55e" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#22c55e" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="orbBlue" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="orbCyan" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#22d3ee" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="blurBig" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="45"/>
+    </filter>
+    <linearGradient id="glassFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.03"/>
+    </linearGradient>
+    <linearGradient id="glassFillAccent" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.05"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8fa3d1"/>
+    </marker>
+  </defs>
+
+  <rect width="1000" height="560" fill="url(#bg)"/>
+  <circle cx="140" cy="150" r="150" fill="url(#orbGreen)" filter="url(#blurBig)"/>
+  <circle cx="140" cy="420" r="150" fill="url(#orbGreen)" filter="url(#blurBig)"/>
+  <circle cx="500" cy="280" r="180" fill="url(#orbBlue)" filter="url(#blurBig)"/>
+  <circle cx="870" cy="280" r="160" fill="url(#orbCyan)" filter="url(#blurBig)"/>
+
+  <text x="500" y="48" text-anchor="middle" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', sans-serif" font-size="26" font-weight="700" fill="#ffffff">Архитектура</text>
+
+  <!-- Agent nodes column -->
+  <g font-family="-apple-system, 'SF Pro Text', 'Segoe UI', sans-serif">
+    <rect x="40" y="95" width="220" height="70" rx="20" fill="url(#glassFill)" stroke="#ffffff" stroke-opacity="0.15"/>
+    <circle cx="70" cy="130" r="7" fill="#22c55e"/>
+    <text x="90" y="125" font-size="16" font-weight="600" fill="#ffffff">Agent — Germany</text>
+    <text x="90" y="145" font-size="12" fill="#9fb0d8" opacity="0.8">tshark · TLS SNI / DNS</text>
+
+    <rect x="40" y="185" width="220" height="70" rx="20" fill="url(#glassFill)" stroke="#ffffff" stroke-opacity="0.15"/>
+    <circle cx="70" cy="220" r="7" fill="#22c55e"/>
+    <text x="90" y="215" font-size="16" font-weight="600" fill="#ffffff">Agent — Netherlands</text>
+    <text x="90" y="235" font-size="12" fill="#9fb0d8" opacity="0.8">tshark · TLS SNI / DNS</text>
+
+    <rect x="40" y="275" width="220" height="70" rx="20" fill="url(#glassFill)" stroke="#ffffff" stroke-opacity="0.15"/>
+    <circle cx="70" cy="310" r="7" fill="#f59e0b"/>
+    <text x="90" y="305" font-size="16" font-weight="600" fill="#ffffff">Agent — Finland</text>
+    <text x="90" y="325" font-size="12" fill="#9fb0d8" opacity="0.8">offline · буфер копится</text>
+
+    <rect x="40" y="365" width="220" height="70" rx="20" fill="url(#glassFill)" stroke="#ffffff" stroke-opacity="0.15"/>
+    <circle cx="70" cy="400" r="7" fill="#22c55e"/>
+    <text x="90" y="395" font-size="16" font-weight="600" fill="#ffffff">Agent — Kazakhstan</text>
+    <text x="90" y="415" font-size="12" fill="#9fb0d8" opacity="0.8">tshark · TLS SNI / DNS</text>
+  </g>
+
+  <!-- arrows into server -->
+  <path d="M262,130 C330,130 330,265 388,265" fill="none" stroke="#8fa3d1" stroke-width="2" marker-end="url(#arrow)" opacity="0.7"/>
+  <path d="M262,220 C320,220 320,260 388,270" fill="none" stroke="#8fa3d1" stroke-width="2" marker-end="url(#arrow)" opacity="0.7"/>
+  <path d="M262,310 C320,310 320,285 388,278" fill="none" stroke="#8fa3d1" stroke-width="2" marker-end="url(#arrow)" opacity="0.7"/>
+  <path d="M262,400 C330,400 330,290 388,282" fill="none" stroke="#8fa3d1" stroke-width="2" marker-end="url(#arrow)" opacity="0.7"/>
+  <text x="330" y="250" font-family="-apple-system, sans-serif" font-size="11" fill="#7f93c4">HTTPS · Bearer token</text>
+
+  <!-- Server card -->
+  <rect x="390" y="185" width="230" height="190" rx="26" fill="url(#glassFillAccent)" stroke="#ffffff" stroke-opacity="0.22"/>
+  <text x="505" y="240" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="19" font-weight="700" fill="#ffffff">🖥 Server</text>
+  <text x="505" y="265" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12" fill="#b9c6ea">FastAPI REST API</text>
+  <text x="505" y="285" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12" fill="#b9c6ea">SQLite</text>
+  <text x="505" y="305" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12" fill="#b9c6ea">aiogram bot</text>
+  <text x="505" y="325" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12" fill="#b9c6ea">Prometheus /metrics</text>
+  <text x="505" y="350" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="11" fill="#7f93c4">host networking</text>
+
+  <!-- arrow to telegram -->
+  <path d="M620,265 C680,265 700,265 750,265" fill="none" stroke="#8fa3d1" stroke-width="2" marker-end="url(#arrow)" opacity="0.8"/>
+  <text x="655" y="252" font-family="-apple-system, sans-serif" font-size="11" fill="#7f93c4">long-polling</text>
+
+  <!-- Telegram card -->
+  <rect x="750" y="195" width="210" height="140" rx="24" fill="url(#glassFillAccent)" stroke="#ffffff" stroke-opacity="0.22"/>
+  <circle cx="855" cy="245" r="24" fill="#27a7e7" opacity="0.9"/>
+  <path d="M843,245 l8,8 l16,-18" stroke="#ffffff" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="855" y="290" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="17" font-weight="700" fill="#ffffff">Telegram</text>
+  <text x="855" y="312" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12" fill="#b9c6ea">единственный UI</text>
+
+  <text x="500" y="500" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="13" fill="#7f93c4" opacity="0.8">Ни SSH, ни паролей между компонентами — только Bearer-токен и Telegram Bot API</text>
+</svg>

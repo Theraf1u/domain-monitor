@@ -1,0 +1,85 @@
+<svg viewBox="0 0 1000 480" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#08080d"/>
+      <stop offset="100%" stop-color="#111122"/>
+    </linearGradient>
+    <radialGradient id="orbAmber" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#f59e0b" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="orbGreen" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#22c55e" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#22c55e" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="orbBlue" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="blurBig" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="45"/>
+    </filter>
+    <linearGradient id="glassFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.03"/>
+    </linearGradient>
+    <linearGradient id="glassFillDim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.015"/>
+    </linearGradient>
+    <marker id="arrow2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8fa3d1"/>
+    </marker>
+  </defs>
+
+  <rect width="1000" height="480" fill="url(#bg)"/>
+  <circle cx="180" cy="130" r="170" fill="url(#orbAmber)" filter="url(#blurBig)"/>
+  <circle cx="820" cy="130" r="170" fill="url(#orbGreen)" filter="url(#blurBig)"/>
+  <circle cx="500" cy="380" r="180" fill="url(#orbBlue)" filter="url(#blurBig)"/>
+
+  <text x="500" y="46" text-anchor="middle" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', sans-serif" font-size="26" font-weight="700" fill="#ffffff">Migration 2.0</text>
+  <text x="500" y="72" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="14" fill="#9fb0d8">migrate-to → migrate-cutover → migrate-finish</text>
+
+  <!-- OLD server -->
+  <rect x="60" y="110" width="260" height="150" rx="26" fill="url(#glassFill)" stroke="#f59e0b" stroke-opacity="0.35"/>
+  <text x="190" y="150" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="18" font-weight="700" fill="#ffffff">Старый сервер</text>
+  <circle cx="130" cy="180" r="5" fill="#f59e0b"/>
+  <text x="145" y="185" font-family="-apple-system, sans-serif" font-size="12" fill="#fcd9a4">Telegram-опрос: выключен</text>
+  <text x="190" y="212" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12" fill="#b9c6ea">API живой · данные не тронуты</text>
+  <text x="190" y="234" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="11" fill="#8095c4">ничего не удаляется автоматически</text>
+
+  <!-- NEW server -->
+  <rect x="680" y="110" width="260" height="150" rx="26" fill="url(#glassFill)" stroke="#22c55e" stroke-opacity="0.4"/>
+  <text x="810" y="150" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="18" font-weight="700" fill="#ffffff">Новый сервер</text>
+  <circle cx="750" cy="180" r="5" fill="#22c55e"/>
+  <text x="765" y="185" font-family="-apple-system, sans-serif" font-size="12" fill="#bdf3d3">Telegram-опрос: включён</text>
+  <text x="810" y="212" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12" fill="#b9c6ea">Docker/Compose/UFW — авто</text>
+  <text x="810" y="234" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="11" fill="#8095c4">standby → cutover → finish</text>
+
+  <!-- agents migrating -->
+  <g font-family="-apple-system, sans-serif" font-size="12" font-weight="600" fill="#ffffff">
+    <rect x="410" y="118" width="180" height="34" rx="14" fill="url(#glassFillDim)" stroke="#ffffff" stroke-opacity="0.15"/>
+    <text x="500" y="140" text-anchor="middle">✅ Agent — Germany</text>
+
+    <rect x="410" y="160" width="180" height="34" rx="14" fill="url(#glassFillDim)" stroke="#ffffff" stroke-opacity="0.15"/>
+    <text x="500" y="182" text-anchor="middle">🔄 Agent — Netherlands</text>
+
+    <rect x="410" y="202" width="180" height="34" rx="14" fill="url(#glassFillDim)" stroke="#ffffff" stroke-opacity="0.15"/>
+    <text x="500" y="224" text-anchor="middle">🔴 Agent — Finland</text>
+  </g>
+  <text x="500" y="266" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="11" fill="#7f93c4">каждый агент сам проверяет цель и переключается на своём heartbeat</text>
+
+  <path d="M320,180 C360,180 380,140 408,135" fill="none" stroke="#8fa3d1" stroke-width="1.5" marker-end="url(#arrow2)" opacity="0.6"/>
+  <path d="M592,135 C640,135 650,180 680,180" fill="none" stroke="#22c55e" stroke-width="1.5" marker-end="url(#arrow2)" opacity="0.7"/>
+
+  <!-- status legend -->
+  <g font-family="-apple-system, sans-serif" font-size="13" fill="#cdd7f5">
+    <rect x="220" y="330" width="560" height="110" rx="24" fill="url(#glassFillDim)" stroke="#ffffff" stroke-opacity="0.1"/>
+    <circle cx="260" cy="365" r="6" fill="#34d399"/>
+    <text x="278" y="370">переключилась — heartbeat идёт на новый сервер</text>
+    <circle cx="260" cy="393" r="6" fill="#f59e0b"/>
+    <text x="278" y="398">ждёт — ещё на старом, дождётся своего heartbeat</text>
+    <circle cx="260" cy="421" r="6" fill="#ef4444"/>
+    <text x="278" y="426">офлайн — не видна нигде, переключится позже сама</text>
+  </g>
+</svg>
