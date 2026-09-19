@@ -1,11 +1,25 @@
 from __future__ import annotations
 
+import asyncio
 import os
+import platform
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
+
+if platform.system() == "Windows":
+    # test_migration_switchover.py runs many short-lived asyncio.run()
+    # calls against real local http.server sockets across the test
+    # session - the default WindowsProactorEventLoopPolicy has known
+    # socket-teardown timing quirks under exactly that pattern (rare,
+    # order-dependent connection-refused flakes only reproducible with
+    # the full suite, never in isolation). The Selector policy doesn't
+    # have this issue and is what these tests actually need (no IOCP
+    # features used anywhere here). Production code is unaffected - this
+    # only changes the policy inside pytest's own process.
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
 @pytest.fixture
