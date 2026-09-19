@@ -51,10 +51,18 @@ fi
 
 # Same PORT/PUBLIC_URL discovery as server/install.sh's own wizard - this
 # host's own free port and own reachable address, never copied from the
-# source server (which would be wrong on a different machine).
+# source server (which would be wrong on a different machine). $2, if
+# given, is `migrate-to --target-public-url` (spec 3.1/3.7) - an admin
+# who already has a stable hostname pointed at this box overrides the
+# raw-IP autodetection with it.
 PORT="$(find_free_port 8280)"
-PUBLIC_URL="http://$(curl -s -4 -m 3 ifconfig.me 2>/dev/null || hostname)"
-[ "$PORT" != "80" ] && PUBLIC_URL="${PUBLIC_URL}:${PORT}"
+TARGET_PUBLIC_URL_OVERRIDE="${2:-}"
+if [ -n "$TARGET_PUBLIC_URL_OVERRIDE" ]; then
+    PUBLIC_URL="$TARGET_PUBLIC_URL_OVERRIDE"
+else
+    PUBLIC_URL="http://$(curl -s -4 -m 3 ifconfig.me 2>/dev/null || hostname)"
+    [ "$PORT" != "80" ] && PUBLIC_URL="${PUBLIC_URL}:${PORT}"
+fi
 
 cp "$PROJECT_DIR/.env.example" "$ENV_FILE"
 # Locked down BEFORE any secret is written into it, not after - avoids a

@@ -15,10 +15,10 @@
 #   domain-monitor-server add-node   добавить ноду в одно действие (без имени)
 #   domain-monitor-server migrate-export        собрать пакет для переноса на другой сервер
 #   domain-monitor-server migrate-import <файл> перенести бота с другого сервера из пакета
-#   domain-monitor-server migrate-to <root@host> [-i ключ]  автоматически перенести на новый сервер (standby)
+#   domain-monitor-server migrate-to <root@host> [-i ключ] [--ssh-port N] [--target-public-url URL] [--dry-run]
 #   domain-monitor-server migrate-cutover <id>  переключить агентов на новый сервер
 #   domain-monitor-server migrate-status [id]   прогресс переключения нод
-#   domain-monitor-server migrate-finish <id>   переключить Telegram-бота, завершить миграцию
+#   domain-monitor-server migrate-finish <id> [-i ключ] [--ssh-port N]  переключить Telegram-бота, завершить миграцию
 #   domain-monitor-server migrate-cancel <id>   отменить незавершённую миграцию
 set -uo pipefail
 

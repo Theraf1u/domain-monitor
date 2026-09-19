@@ -19,15 +19,17 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 JOB_ID="${1:-}"
 SSH_KEY=""
+SSH_PORT="22"
 shift || true
 while [ $# -gt 0 ]; do
     case "$1" in
         -i) SSH_KEY="${2:-}"; shift 2 ;;
+        --ssh-port) SSH_PORT="${2:-22}"; shift 2 ;;
         *) echo "Неизвестный параметр: $1" >&2; exit 1 ;;
     esac
 done
 if [ -z "$JOB_ID" ]; then
-    echo "Использование: domain-monitor-server migrate-finish <job_id> [-i /path/to/ssh/key]" >&2
+    echo "Использование: domain-monitor-server migrate-finish <job_id> [-i /path/to/ssh/key] [--ssh-port N]" >&2
     exit 1
 fi
 
@@ -57,7 +59,7 @@ if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
 fi
 
 target_host="$(echo "$target_url" | grep -oP '(?<=://)[^:/]+')"
-SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new)
+SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -p "$SSH_PORT")
 [ -n "$SSH_KEY" ] && SSH_OPTS+=(-i "$SSH_KEY")
 
 echo "[*] Выключаю Telegram-опрос на ЭТОМ (старом) сервере ..."
