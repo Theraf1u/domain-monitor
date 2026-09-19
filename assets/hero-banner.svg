@@ -33,6 +33,10 @@
       <stop offset="100%" stop-color="#bcd0ff"/>
     </linearGradient>
     <clipPath id="cardClip"><rect x="60" y="70" width="1080" height="260" rx="34"/></clipPath>
+    <linearGradient id="pillFill" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#22c55e" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#22d3ee" stop-opacity="0.20"/>
+    </linearGradient>
   </defs>
 
   <rect width="1200" height="400" fill="url(#bg)"/>
@@ -61,7 +65,14 @@
     <line x1="1030" y1="150" x2="1060" y2="120" stroke="#ffffff" stroke-opacity="0.25" stroke-width="1.5"/>
   </g>
 
-  <text x="110" y="185" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', sans-serif" font-size="58" font-weight="700" fill="url(#titleGrad)" letter-spacing="-1">Domain Monitor</text>
-  <text x="110" y="235" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', sans-serif" font-size="30" font-weight="600" fill="#8fa3d1" letter-spacing="0.5">2.0</text>
-  <text x="110" y="285" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', sans-serif" font-size="21" fill="#c3cbe6" opacity="0.85">Мультинодовый центр управления VPN-мониторингом — целиком в Telegram</text>
+  <text x="110" y="165" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', sans-serif" font-size="52" font-weight="700" fill="url(#titleGrad)" letter-spacing="-1">Domain Monitor <tspan fill="#8fa3d1" font-size="30" font-weight="600">2.0</tspan></text>
+
+  <text x="110" y="212" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', sans-serif" font-size="22" font-weight="600" fill="#e6ebfb">Понять, с какими доменами общаются приложения на ноде —</text>
+  <text x="110" y="242" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', sans-serif" font-size="22" font-weight="600" fill="#e6ebfb">и пустить нужные из них в обход VPN, напрямую</text>
+
+  <!-- purpose pill badge -->
+  <rect x="110" y="266" width="430" height="40" rx="20" fill="url(#pillFill)" stroke="#ffffff" stroke-opacity="0.18"/>
+  <text x="132" y="292" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', sans-serif" font-size="15" font-weight="600" fill="#d8fbe8">🇷🇺 whitelist-роутинг для российских сервисов</text>
+
+  <text x="110" y="325" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', sans-serif" font-size="14" fill="#8fa0cc" opacity="0.9">Ставится за пару минут на любую VPN-ноду · управление целиком в Telegram</text>
 </svg>
