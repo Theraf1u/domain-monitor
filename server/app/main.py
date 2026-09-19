@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -22,7 +23,15 @@ from app.buffer_alert_monitor import BufferAlertMonitor
 from app.health_monitor import NodeHealthMonitor
 from app.live_view import LiveViewManager
 from app.logging_config import setup_logging
-from app.metrics import DOMAINS_TOTAL, NODES_ONLINE, NODES_TOTAL
+from app.metrics import (
+    DATABASE_SIZE_BYTES,
+    DOMAINS_TOTAL,
+    MIGRATION_ACTIVE,
+    NODE_BUFFER_BYTES,
+    NODES_OFFLINE,
+    NODES_ONLINE,
+    NODES_TOTAL,
+)
 from app.notifier import Notifier
 from app.rate_limit import NodeRateLimiter
 from app.retention import RetentionTask
@@ -150,7 +159,27 @@ def metrics(request: Request) -> Response:
     now = datetime.now(timezone.utc)
     offline_after_seconds = runtime_settings.get_node_offline_after_seconds(db, config)
     nodes_list = db.list_nodes()
+    online_count = sum(1 for n in nodes_list if n.is_online(offline_after_seconds, now))
     NODES_TOTAL.set(len(nodes_list))
-    NODES_ONLINE.set(sum(1 for n in nodes_list if n.is_online(offline_after_seconds, now)))
+    NODES_ONLINE.set(online_count)
+    NODES_OFFLINE.set(len(nodes_list) - online_count)
     DOMAINS_TOTAL.set(db.count_domains())
+
+    # .clear() first so a deleted/renamed node's label doesn't linger in
+    # the registry forever showing a stale value (a known gotcha with
+    # per-entity labeled gauges) - cheap to rebuild fresh every scrape,
+    # node counts are always small.
+    NODE_BUFFER_BYTES.clear()
+    for n in nodes_list:
+        if n.buffer_bytes is not None:
+            NODE_BUFFER_BYTES.labels(node_id=str(n.id)).set(n.buffer_bytes)
+
+    try:
+        DATABASE_SIZE_BYTES.set(os.path.getsize(config.database_path))
+    except OSError:
+        pass
+
+    active_job = db.active_migration_job()
+    MIGRATION_ACTIVE.set(1 if active_job else 0)
+
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)

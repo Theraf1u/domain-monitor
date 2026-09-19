@@ -16,7 +16,13 @@ from app.api.deps import get_db, get_event_rate_limiter, get_notifier, require_n
 from app.api.schemas import EventBatchRequest, EventBatchResponse
 from app.database import Database
 from app.filters import classify_domain
-from app.metrics import EVENTS_TOTAL, NEW_DOMAINS_TOTAL, WATCHLIST_HITS_TOTAL
+from app.metrics import (
+    EVENTS_RATE_LIMITED_TOTAL,
+    EVENTS_TOTAL,
+    IGNORE_HITS_TOTAL,
+    NEW_DOMAINS_TOTAL,
+    WATCHLIST_HITS_TOTAL,
+)
 from app.models import Node
 from app.notifier import Notifier
 from app.rate_limit import NodeRateLimiter
@@ -34,6 +40,7 @@ async def ingest_events(
 ) -> EventBatchResponse:
     allowed, retry_after = rate_limiter.check(node.id)
     if not allowed:
+        EVENTS_RATE_LIMITED_TOTAL.inc()
         # A request-level limit (not per-event) - a normal agent posting
         # one batch per BATCH_INTERVAL_SECONDS never gets close to this,
         # only a misbehaving/compromised agent hammering the endpoint
@@ -75,6 +82,7 @@ async def ingest_events(
                 WATCHLIST_HITS_TOTAL.inc()
                 await notifier.schedule_watchlist(node, domain_row.domain)
             elif verdict.suppresses_notification:
+                IGNORE_HITS_TOTAL.inc()
                 await asyncio.to_thread(db.set_ignored, domain_row.id, True)
             else:
                 await notifier.schedule(node, domain_row.domain)

@@ -40,6 +40,7 @@ from aiogram.types import FSInputFile
 from app import backup_settings
 from app.config import Config
 from app.database import Database
+from app.metrics import BACKUP_RESULT_TOTAL
 from app.notifier import Notifier
 
 logger = logging.getLogger(__name__)
@@ -121,6 +122,7 @@ class BackupTask:
                 path = await asyncio.to_thread(self._create_backup_file, kind)
             except Exception:
                 logger.exception("Failed to create backup archive")
+                BACKUP_RESULT_TOTAL.labels(kind=kind, result="failed").inc()
                 if self.notifier.should_deliver("backup_failed"):
                     await self.notifier.broadcast("❌ Автобэкап не удался: не получилось создать архив (см. логи сервера).")
                 return "❌ Не удалось создать архив бэкапа - подробности в логах сервера."
@@ -134,6 +136,7 @@ class BackupTask:
 
             if not ok:
                 logger.error("Backup verification failed for %s: %s", name, detail)
+                BACKUP_RESULT_TOTAL.labels(kind=kind, result="failed").inc()
                 if self.notifier.should_deliver("backup_failed"):
                     await self.notifier.broadcast(
                         f"❌ Бэкап <code>{name}</code> создан, но не прошёл проверку целостности ({detail}). "
@@ -141,6 +144,8 @@ class BackupTask:
                         f"старые рабочие копии не тронуты."
                     )
                 return f"❌ Бэкап создан, но не прошёл проверку целостности: {detail}. Ротация пропущена, старые копии сохранены."
+
+            BACKUP_RESULT_TOTAL.labels(kind=kind, result="success").inc()
 
             try:
                 await asyncio.to_thread(self._rotate, backup_settings.keep_count(self.db))
