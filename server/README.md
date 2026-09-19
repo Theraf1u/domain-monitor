@@ -252,6 +252,16 @@ The same status is also in the bot itself: ⚙️ Настройки → 🚚 М
   networking's NAT frequently can't route to a proxy client's own
   TUN/loopback interface, while host networking can (see
   `docker-compose.yml`).
+- **Docker socket mount - a known, accepted risk, not a "safe read-only"
+  pattern**: `docker-compose.yml` mounts `/var/run/docker.sock:...:ro` so
+  the bot can show Docker status. `:ro` only stops the container from
+  replacing the socket file itself - it does not restrict what Docker
+  API calls can be made over it. Anything that reaches this socket has
+  the same power as root on the host. `app/docker_info.py` only ever
+  issues read-only calls by its own discipline, not because the mount
+  enforces it. This was accepted deliberately, not overlooked - remove
+  the volume line if that tradeoff isn't acceptable for your deployment;
+  the bot degrades cleanly to pointing at `doctor` instead.
 
 ## Roadmap (not yet built)
 

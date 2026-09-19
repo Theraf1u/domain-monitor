@@ -1,14 +1,14 @@
 """The "⚙️ Настройки" section (spec 2.0 Part 2, section 1): a hub screen
 plus Сервер/Ноды по умолчанию/Часовой пояс/Хранение данных/Администраторы/
-Безопасность/Диагностика/О системе.
+Безопасность/Диагностика/Обновления/Миграция/О системе.
 
-Docker/UFW status, system updates, and migration aren't reachable from
-here yet - those are later stages in the spec's own execution order
-(6/7), and showing a status/action screen for something the container
-genuinely cannot check (no Docker socket mounted, by design - see
-docker-compose.yml) would mean fabricating data. Where a check is
-honestly outside what a container can see, the screen says so and points
-at `doctor.sh` on the host instead of guessing.
+Docker Engine status is shown via a read-only socket mount (see
+docker-compose.yml and app/docker_info.py) - version and container
+count only, never anything that could act on a container. Compose
+version and UFW status stay genuinely out of reach even with that
+socket (Compose is a client-side CLI plugin the daemon knows nothing
+about; UFW isn't a Docker concept at all) - those screens say so and
+point at `doctor.sh` on the host instead of guessing.
 """
 from __future__ import annotations
 
@@ -64,6 +64,8 @@ async def cb_settings_server(call: CallbackQuery, db: Database, config: Config, 
     except Exception:
         telegram_line = "🔴 не удалось получить данные бота от Telegram API"
 
+    docker_line = await _docker_status_line()
+
     text = (
         "🖥 <b>Сервер</b>\n\n"
         f"Версия: {SERVER_VERSION} (git {git_revision()})\n"
@@ -74,12 +76,26 @@ async def cb_settings_server(call: CallbackQuery, db: Database, config: Config, 
         f"Размер БД: {format_bytes(db_size)}\n"
         f"Свободно на диске: {format_bytes(free_bytes)}\n"
         f"Telegram: {telegram_line}\n"
-        f"Docker / Compose / UFW: недоступно для проверки изнутри контейнера "
-        f"(нет доступа к Docker-сокету по архитектуре) - запусти "
+        f"Docker: {docker_line}\n"
+        f"Compose / UFW: недоступно изнутри контейнера даже с Docker-сокетом "
+        f"(Compose - клиентский плагин, UFW вообще не про Docker) - запусти "
         f"<code>domain-monitor-server doctor</code> на самом сервере."
     )
     await call.message.edit_text(text, parse_mode="HTML", reply_markup=kb.settings_server_menu())
     await call.answer()
+
+
+async def _docker_status_line() -> str:
+    from app import docker_info
+
+    version = await docker_info.engine_version()
+    if version is None:
+        return "🔴 недоступен (нет сокета /var/run/docker.sock в контейнере - обнови docker-compose.yml и пересоздай контейнер)"
+    summary = await docker_info.container_summary()
+    if summary is None:
+        return f"🟢 Engine {version}"
+    running, total = summary
+    return f"🟢 Engine {version}, контейнеров: {running}/{total} запущено"
 
 
 # ------------------------------------------------------------------
@@ -357,8 +373,11 @@ async def cb_settings_diagnostics_run(call: CallbackQuery, db: Database, config:
     else:
         lines.append(f"✓ PUBLIC_URL задан: {config.public_url}")
 
+    docker_line = await _docker_status_line()
+    lines.append(("✓" if docker_line.startswith("🟢") else "✗") + f" Docker: {docker_line}")
+
     lines.append(
-        "\nDOCKER / NETWORK / SECURITY (firewall) - недоступно для проверки изнутри "
+        "\nCompose / NETWORK / SECURITY (firewall) - недоступно для проверки изнутри "
         "контейнера. Запусти <code>domain-monitor-server doctor</code> на сервере."
     )
 

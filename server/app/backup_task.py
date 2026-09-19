@@ -85,6 +85,24 @@ class BackupTask:
     def stop(self) -> None:
         self._stopped.set()
 
+    def is_busy(self) -> bool:
+        """Exposed for the Migration 2.0 concurrency guard (spec 10) - a
+        migration must not start while a backup/restore already holds
+        this lock, mirroring the check the other direction (see
+        run_backup_now/restore_from_backup below)."""
+        return self._lock.locked()
+
+    def _migration_in_progress_message(self) -> str | None:
+        job = self.db.active_migration_job()
+        if job is None:
+            return None
+        return (
+            f"❌ Сейчас выполняется миграция (задача #{job['id']}, статус {job['status']}) - "
+            f"бэкап/восстановление временно недоступны, чтобы не менять данные, "
+            f"на которые уже опирается перенос. Дождись завершения (migrate-finish) "
+            f"или отмени миграцию (migrate-cancel)."
+        )
+
     async def run(self) -> None:
         while not self._stopped.is_set():
             try:
@@ -117,6 +135,9 @@ class BackupTask:
         snapshot for disaster recovery/migration). Safe to call from the
         scheduler, the "backup now" button, or before a restore - the
         lock means concurrent callers just queue up instead of racing."""
+        blocked = self._migration_in_progress_message()
+        if blocked:
+            return blocked
         async with self._lock:
             try:
                 path = await asyncio.to_thread(self._create_backup_file, kind)
@@ -348,6 +369,9 @@ class BackupTask:
         """1. pre-restore snapshot, 2. verify target, 3. swap files,
         4. reopen + migrate + healthcheck, 5. roll back to the pre-restore
         snapshot automatically if 3 or 4 fails (spec 2.4)."""
+        blocked = self._migration_in_progress_message()
+        if blocked:
+            return blocked
         async with self._lock:
             archive_path = os.path.join(self.backup_dir, filename)
             if not os.path.isfile(archive_path):

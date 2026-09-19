@@ -36,6 +36,21 @@ if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
     exit 0
 fi
 
+# spec 10: refuse while a migration is in progress - checked while the
+# API is still up, before the container gets stopped below.
+ENV_FILE="$PROJECT_DIR/.env"
+if [ -f "$ENV_FILE" ]; then
+    ADMIN_API_KEY="$(grep -oP '^ADMIN_API_KEY=\K.*' "$ENV_FILE" 2>/dev/null || true)"
+    PORT="$(grep -oP '^PORT=\K.*' "$ENV_FILE" 2>/dev/null || echo 8280)"
+    if [ -n "$ADMIN_API_KEY" ]; then
+        active_job="$(curl -fsS -m 5 -H "X-Admin-Key: ${ADMIN_API_KEY}" "http://127.0.0.1:${PORT}/api/v1/migration/jobs/active" 2>/dev/null || echo '')"
+        if [ -n "$active_job" ] && [ "$active_job" != "null" ]; then
+            echo "✗ Сейчас выполняется миграция - восстановление временно недоступно: $active_job" >&2
+            exit 1
+        fi
+    fi
+fi
+
 cd "$PROJECT_DIR"
 compose stop 2>/dev/null || true
 

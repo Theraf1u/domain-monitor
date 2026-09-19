@@ -12,6 +12,23 @@ OUT="$BACKUP_DIR/domain-monitor-server-backup-$STAMP.tar.gz"
 mkdir -p "$BACKUP_DIR"
 cd "$PROJECT_DIR"
 
+# spec 10: refuse while a migration is in progress - same rule the bot's
+# own "backup now" button already enforces (see backup_task.py's
+# _migration_in_progress_message()), applied here too since this CLI
+# command bypasses that Python code entirely and talks straight to the
+# filesystem.
+if [ -f "$PROJECT_DIR/.env" ]; then
+    ADMIN_API_KEY="$(grep -oP '^ADMIN_API_KEY=\K.*' "$PROJECT_DIR/.env" 2>/dev/null || true)"
+    PORT="$(grep -oP '^PORT=\K.*' "$PROJECT_DIR/.env" 2>/dev/null || echo 8280)"
+    if [ -n "$ADMIN_API_KEY" ]; then
+        active_job="$(curl -fsS -m 5 -H "X-Admin-Key: ${ADMIN_API_KEY}" "http://127.0.0.1:${PORT}/api/v1/migration/jobs/active" 2>/dev/null || echo '')"
+        if [ -n "$active_job" ] && [ "$active_job" != "null" ]; then
+            echo "✗ Сейчас выполняется миграция - бэкап временно недоступен: $active_job" >&2
+            exit 1
+        fi
+    fi
+fi
+
 tar_args=(-czf "$OUT")
 [ -d data ] && tar_args+=(data)
 [ -f .env ] && tar_args+=(.env)

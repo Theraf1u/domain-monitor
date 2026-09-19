@@ -73,6 +73,42 @@ def test_failed_verification_never_rotates_out_good_backups(backup_task, monkeyp
     assert any(b["verified"] for b in backups)
 
 
+def test_backup_refuses_while_migration_active(backup_task, db):
+    """spec 10: backup/restore must not run while a migration is in
+    progress - both ultimately touch the same DB files a migration
+    package is archiving."""
+    job_id = db.create_migration_job("http://target.example")
+    result = asyncio.run(backup_task.run_backup_now("db"))
+    assert "❌" in result
+    assert "миграция" in result.lower()
+    assert backup_task.list_backups() == []
+
+    db.set_migration_job_status(job_id, "completed")
+    result2 = asyncio.run(backup_task.run_backup_now("db"))
+    assert "✅" in result2
+
+
+def test_restore_refuses_while_migration_active(backup_task, db):
+    asyncio.run(backup_task.run_backup_now("db"))
+    filename = backup_task.list_backups()[0]["filename"]
+
+    db.create_migration_job("http://target.example")
+    result = asyncio.run(backup_task.restore_from_backup(filename))
+    assert "❌" in result
+    assert "миграция" in result.lower()
+
+
+def test_is_busy_reflects_the_real_lock(backup_task):
+    assert backup_task.is_busy() is False
+
+    async def hold_lock_briefly():
+        async with backup_task._lock:
+            assert backup_task.is_busy() is True
+
+    asyncio.run(hold_lock_briefly())
+    assert backup_task.is_busy() is False
+
+
 def test_concurrent_backups_never_collide_on_filename(backup_task):
     """Regression test for the exact bug found this session: creating
     two backups back-to-back (as a scheduled backup and a manual

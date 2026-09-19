@@ -9,12 +9,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.deps import get_db, require_admin
+from app.api.deps import get_backup_task, get_db, require_admin
 from app.api.schemas import (
     MigrationJobCreateRequest,
     MigrationJobResponse,
     MigrationJobStatusUpdateRequest,
 )
+from app.backup_task import BackupTask
 from app.database import Database
 
 router = APIRouter(prefix="/api/v1/migration", tags=["migration"], dependencies=[Depends(require_admin)])
@@ -23,12 +24,24 @@ _VALID_STATUSES = {"pending", "standby", "cutover", "completed", "cancelled", "f
 
 
 @router.post("/jobs", response_model=MigrationJobResponse)
-def create_job(body: MigrationJobCreateRequest, db: Database = Depends(get_db)) -> MigrationJobResponse:
+def create_job(
+    body: MigrationJobCreateRequest, db: Database = Depends(get_db),
+    backup_task: BackupTask = Depends(get_backup_task),
+) -> MigrationJobResponse:
     existing = db.active_migration_job()
     if existing is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"A migration job (id={existing['id']}, status={existing['status']}) is already in progress",
+        )
+    # spec 10: a migration must not start mid-backup/restore, since both
+    # ultimately touch the same DB files migrate_export.sh is about to
+    # archive - the other direction (backup/restore refusing while a
+    # migration is active) is enforced in backup_task.py itself.
+    if backup_task.is_busy():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A backup or restore is currently in progress - try again once it finishes",
         )
     job_id = db.create_migration_job(body.target_url)
     return MigrationJobResponse(**db.get_migration_job(job_id))

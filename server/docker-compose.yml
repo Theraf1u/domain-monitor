@@ -15,6 +15,22 @@ services:
     env_file: .env
     volumes:
       - ./data:/data
+      # SECURITY NOTE: the `:ro` here only stops this container from
+      # replacing/deleting the socket FILE - it does NOT restrict what
+      # Docker API calls can be made over it once connected. Any process
+      # that reaches this socket (bug in this app, a compromised
+      # dependency, anything) has the same power as root on the HOST -
+      # create/exec/remove any container, mount the whole host filesystem
+      # into a new one, etc. app/docker_info.py only ever issues
+      # read-only calls (GET /version, GET /containers/json) by its own
+      # discipline, not because the socket enforces it. This is a
+      # deliberate, explicitly risk-accepted tradeoff (spec 2.0 Part 2,
+      # section 1.1 wants Docker status visible in the bot; the
+      # container already faces the internet and takes agent traffic) -
+      # not a "safe read-only" pattern. Remove this mount entirely if
+      # that tradeoff stops being acceptable; the bot degrades cleanly
+      # to pointing at `doctor` on the host (see docker_info.py).
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:${PORT:-8280}/healthz"]
       interval: 30s

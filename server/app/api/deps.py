@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from fastapi import Depends, Header, HTTPException, Request, status
 
+from app.backup_task import BackupTask
 from app.config import Config
 from app.database import Database
 from app.models import Node
@@ -30,6 +31,10 @@ def get_config(request: Request) -> Config:
 
 def get_notifier(request: Request) -> Notifier:
     return request.app.state.notifier
+
+
+def get_backup_task(request: Request) -> BackupTask:
+    return request.app.state.backup_task
 
 
 def get_event_rate_limiter(request: Request) -> NodeRateLimiter:

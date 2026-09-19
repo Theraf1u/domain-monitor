@@ -104,3 +104,18 @@ def test_unknown_job_id_404s(client):
 def test_requires_admin_key(client):
     r = client.get("/api/v1/migration/jobs/active")
     assert r.status_code == 401
+
+
+def test_create_refuses_while_backup_task_busy(client, monkeypatch):
+    """spec 10: the other half of the concurrency guard - starting a
+    migration must be refused while a backup/restore holds
+    BackupTask's lock, even though nothing about backups is exposed
+    over this API. is_busy() is a thin wrapper over the real
+    asyncio.Lock (see test_backup.py for that side); here it's enough
+    to prove the migration endpoint actually checks it."""
+    from app.main import app
+
+    monkeypatch.setattr(app.state.backup_task, "is_busy", lambda: True)
+    r = client.post("/api/v1/migration/jobs", json={"target_url": "http://x.example"}, headers=auth_headers())
+    assert r.status_code == 409
+    assert "backup" in r.json()["detail"].lower()

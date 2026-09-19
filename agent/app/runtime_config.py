@@ -59,6 +59,7 @@ def set_override(data_dir: str, server_url: str | None) -> None:
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump({"server_url_override": server_url}, fh)
+    os.chmod(tmp, 0o600)  # not a secret, but spec 9 lists runtime config among files to lock down
     os.replace(tmp, path)  # atomic - a reader never sees a half-written file
 
 
