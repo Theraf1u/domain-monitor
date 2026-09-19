@@ -1,29 +1,14 @@
 """Migration 2.0's /api/v1/migration endpoints - the REST layer that
 migrate_to.sh/migrate_cutover.sh/etc. and the Telegram screen both drive
-instead of touching migration_jobs directly."""
+instead of touching migration_jobs directly.
+
+Uses the session-shared `client` fixture from conftest.py (see its
+docstring for why this can't be a fresh TestClient per module)."""
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
 
-
-@pytest.fixture(scope="module")
-def client(tmp_path_factory):
-    # module-scoped: aiogram's Router instances are module-level
-    # singletons (see app/telegram/handlers/*.py) that can only ever be
-    # attached to one Dispatcher - a fresh `TestClient(app)` per test
-    # would re-run the app's lifespan and try to re-attach them,
-    # raising "Router is already attached". One shared app per test
-    # module (real production only ever starts lifespan once too) sums
-    # to the same thing minus that artifact; each test below cleans up
-    # its own migration_jobs state instead of relying on DB isolation.
-    import os
-
-    os.environ["DATA_DIR"] = str(tmp_path_factory.mktemp("data"))
-    from app.main import app
-
-    with TestClient(app) as c:
-        yield c
+from conftest import admin_headers as auth_headers
 
 
 @pytest.fixture(autouse=True)
@@ -36,12 +21,6 @@ def _clear_active_job(client):
         client.patch(
             f"/api/v1/migration/jobs/{active['id']}", json={"status": "cancelled"}, headers=auth_headers(),
         )
-
-
-def auth_headers():
-    import os
-
-    return {"X-Admin-Key": os.environ["ADMIN_API_KEY"]}
 
 
 def test_no_active_job_returns_null(client):

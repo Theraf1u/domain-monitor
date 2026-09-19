@@ -109,6 +109,57 @@ def test_is_busy_reflects_the_real_lock(backup_task):
     assert backup_task.is_busy() is False
 
 
+def test_rotate_keeps_only_the_configured_count(backup_task, db):
+    from app import backup_settings
+
+    backup_settings.set_keep_count(db, 2)
+    for _ in range(4):
+        result = asyncio.run(backup_task.run_backup_now("db"))
+        assert "✅" in result
+    backups = backup_task.list_backups()
+    assert len(backups) == 2
+    # Rotation keeps the NEWEST ones, not an arbitrary 2.
+    mtimes = [b["mtime"] for b in backups]
+    assert mtimes == sorted(mtimes, reverse=True)
+
+
+def test_restore_reverts_database_to_backup_state(backup_task, db):
+    node_before = db.create_node_auto("hash-before")
+    result = asyncio.run(backup_task.run_backup_now("db"))
+    assert "✅" in result
+    filename = backup_task.list_backups()[0]["filename"]
+
+    node_after = db.create_node_auto("hash-after")
+    assert db.get_node(node_after.id) is not None
+
+    restore_result = asyncio.run(backup_task.restore_from_backup(filename))
+    assert "✅" in restore_result or "успешно" in restore_result.lower() or "восстанов" in restore_result.lower()
+
+    # The node created AFTER the backup must be gone; the one that
+    # existed AT backup time must still be there.
+    assert db.get_node(node_before.id) is not None
+    assert db.get_node(node_after.id) is None
+
+
+def test_restore_creates_a_pre_restore_snapshot_first(backup_task, db):
+    db.create_node_auto("hash")
+    asyncio.run(backup_task.run_backup_now("db"))
+    filename = backup_task.list_backups()[0]["filename"]
+    count_before = len(backup_task.list_backups())
+
+    asyncio.run(backup_task.restore_from_backup(filename))
+
+    # The pre-restore snapshot is a new backup file, on top of the one
+    # being restored from.
+    assert len(backup_task.list_backups()) == count_before + 1
+
+
+def test_restore_of_unknown_file_fails_cleanly(backup_task):
+    result = asyncio.run(backup_task.restore_from_backup("does-not-exist.tar.gz"))
+    assert "❌" in result
+    assert "не найден" in result.lower()
+
+
 def test_concurrent_backups_never_collide_on_filename(backup_task):
     """Regression test for the exact bug found this session: creating
     two backups back-to-back (as a scheduled backup and a manual
